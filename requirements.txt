@@ -1,0 +1,13 @@
+cryptography
+Django
+django-bootstrap5
+django-filter
+djangorestframework
+drf-spectacular
+fontawesomefree
+markdown
+psycopg2-binary
+pyjwt
+python-dateutil
+requests
+uwsgi

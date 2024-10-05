@@ -1,0 +1,59 @@
+{% load static %}
+<nav class="navbar navbar-expand-lg bg-light px-2">
+    <a class="navbar-brand navbar" href={% url 'home' %}>
+        <img
+          src="{% static 'images/logo/fabric-brand.png' %}"
+          alt="fabric logo"
+          height="30"
+        />
+        Publication Tracker
+      </a>
+    <button
+            class="navbar-toggler"
+            type="button"
+            data-toggle="collapse"
+            data-target="#navbarNav"
+            aria-controls="navbarNav"
+            aria-expanded="false"
+            aria-label="Toggle navigation"
+    >
+        <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav me-auto order-0">
+            <li class="nav-item">
+                <a class="nav-link" href={% url 'pubsimple_list' %}>Publications</a>
+            </li>
+{#            <li class="nav-item">#}
+{#                <a class="nav-link" href="#">Authors</a>#}
+{#            </li>#}
+            {% if api_user.is_authenticated %}
+                <li class="nav-item">
+                    <a
+                      class="nav-link"
+                      href="/api/swagger/"
+                      target="_blank"
+
+                    >
+                      API
+                    </a>
+                </li>
+            {% endif %}
+        </ul>
+        <div class="navbar-nav nav-item ms-auto order-5">
+            {% if api_user.is_authenticated %}
+                <a class="nav-link" href="/logout">
+                  <button class="btn btn-outline-success">
+                    Logout
+                  </button>
+                </a>
+            {% else %}
+                <a class="nav-link" href="/login">
+                  <button class="btn btn-outline-primary">
+                    Login
+                  </button>
+                </a>
+            {% endif %}
+        </div>
+    </div>
+</nav>

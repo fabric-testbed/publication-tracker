@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+
+{% block head %}
+    <style>
+        label.required::after {
+            content: ' * required';
+            color: red;
+            font-size: small;
+        }
+    </style>
+{% endblock %}
+
+{% block title %}
+    Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="text-danger" style="font-size: large">{{ message }}</div>
+    {% endif %}
+    {% if api_user.is_authenticated %}
+        {% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}
+            <div class="container w-85">
+                <h3>Create Publication</h3>
+                <form id="form" method="POST" class="form-group">
+                    {% csrf_token %}
+                    <p>
+                        {{ form.title.label_tag }} {{ form.title }}
+                    </p>
+                    <p>
+                        {{ form.authors.label_tag }} {{ form.authors }}
+                    </p>
+                    <p>
+                        {{ form.link.label_tag }} {{ form.link }}
+                    </p>
+                    <p>
+                        {{ form.year.label_tag }} {{ form.year }}
+                    </p>
+                    <p>
+                        {{ form.project_uuid.label_tag }} {{ form.project_uuid }}
+                    </p>
+                    <p>
+                        {{ form.project_name.label_tag }} {{ form.project_name }}
+                    </p>
+                    <br>
+                </form>
+                <br>
+                <button class="btn btn-success mr-2" type="submit" form="form" name="save">Save</button>
+                <button class="btn btn-secondary mr-2" value="cancel">
+                    <a href="{% url 'pubsimple_list' %}" class="unlink">Back</a>
+                </button>
+            </div>
+        {% else %}
+            You are not able to create a Publication
+        {% endif %}
+    {% else %}
+        <div class="alert alert-warning" role="alert">
+            You are not logged in. Please login first to create a publication.
+        </div>
+        <a href="/login">
+            <button class="message-btn btn btn-success">Login</button>
+        </a>
+    {% endif %}
+    {% if debug %}
+        <hr>
+        <pre><strong>form</strong>:<br>{{ form.data|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

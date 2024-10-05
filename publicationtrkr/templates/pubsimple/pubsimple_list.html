@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="text-danger" style="font-size: large">{{ message }}</div>
+    {% endif %}
+    <div class="container w-85">
+        <form method="get">
+            {% csrf_token %}
+            <h2>Publications</h2>
+            <div class="d-flex flex-row justify-content-between">
+                {% if search %}
+                    <input id="search" type="text" name="search" class="form-control w-75" value="{{ search }}">
+                {% else %}
+                    <input id="search" type="text" name="search" class="form-control w-75"
+                           placeholder="Search publications by title or project name...">
+                {% endif %}
+                <div>
+                    <button class="btn btn-primary ml-1" id="search_submit" type="submit">
+                        Search
+                    </button>
+                    {% if api_user.is_authenticated and api_user.can_create_publication or api_user.is_authenticated and api_user.is_publication_tracker_admin %}
+                        <button class="btn btn-success ml-1" id="create_publication" type="button">
+                            <a href="{% url 'pubsimple_create' %}" class="unlink">Create Publication</a>
+                        </button>
+                    {% endif %}
+                </div>
+            </div>
+        </form>
+        <table class="table table-striped table-bordered my-4">
+            <tbody>
+            {% for pub in simplepubs.results %}
+                <tr>
+                    <td>
+                        <b>Title: </b>
+                        <a href="{% url 'pubsimple_detail' uuid=pub.uuid %}">
+                            {{ pub.title }}
+                        </a>
+                        {% if pub.link %}
+                            (
+                            <a href="{{ pub.link }}" target="_blank" style="font-style: italic">
+                                link to source
+                            </a>
+                            )
+                        {% endif %}
+                        <br>
+                        <b>Authors: </b>
+                        {% for author in pub.authors %}
+                            {% if not forloop.last %}
+                                {{ author }},
+                            {% else %}
+                                {{ author }}
+                            {% endif %}
+                        {% endfor %}
+                        <br>
+                        <b>Year: </b>{{ pub.year }}
+                        <br>
+                        {% if pub.project_name %}
+                            <b>Project: </b>
+                            <a href="{{ projects_url }}/{{ pub.project_uuid }}" target="_blank">
+                                {{ pub.project_name }}
+                            </a>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div class="d-flex flex-row align-items-center justify-content-between">
+            {% if prev_page %}
+                <button type="button" class="btn btn-secondary mr-2">
+                    {% if search %}
+                        <a href="{{ simplepubs.previous }}&search={{ search }}" class="unlink">
+                            <em class="fa fa-fw fa-angles-left"></em> Page {{ prev_page }}
+                        </a>
+                    {% else %}
+                        <a href="{{ simplepubs.previous }}" class="unlink">
+                            <em class="fa fa-fw fa-angles-left"></em> Page {{ prev_page }}
+                        </a>
+                    {% endif %}
+                </button>
+            {% else %}
+                <button class="btn btn-secondary mr-2 disabled">
+                    <a href="{{ simplepubs.previous }}" class="unlink">
+                        <em class="fa fa-fw fa-angles-left"></em>
+                    </a>
+                </button>
+            {% endif %}
+            Results: {{ item_range }} of {{ count }}
+            {% if next_page %}
+                <form type="get" action="." style="margin: 0">
+                    <button type="button" class="btn btn-secondary mr-2">
+                        {% if search %}
+                            <a href="{{ simplepubs.next }}&search={{ search }}"
+                               class="unlink">
+                                Page {{ next_page }} <em class="fa fa-fw fa-angles-right"></em>
+                            </a>
+                        {% else %}
+                            <a href="{{ simplepubs.next }}" class="unlink">
+                                Page {{ next_page }} <em class="fa fa-fw fa-angles-right"></em>
+                            </a>
+                        {% endif %}
+                    </button>
+                </form>
+            {% else %}
+                <button class="btn btn-secondary mr-2 disabled">
+                    <a href="{{ simplepubs.next }}" class="unlink">
+                        <em class="fa fa-fw fa-angles-right"></em>
+                    </a>
+                </button>
+            {% endif %}
+        </div>
+    </div>
+    {% if debug %}
+        <hr>
+        <pre><strong>simplepubs</strong>:<br>{{ simplepubs|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

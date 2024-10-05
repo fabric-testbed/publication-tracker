@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if not api_user.access_expires %}
+        <h3 class="text-center mt-4">Please log in to gain full access.</h3>
+    {% else %}
+        <div class="homepage">
+            <h2>Publication Tracker - simple format</h2>
+
+            <b>WORK IN PROGRESS</b>
+
+            <p>
+                The Publication Tracker is designed to help FABRIC users and operators keep track of publications
+                that have in some way utilized FABRIC services to do their work.
+            </p>
+            <p>
+                At this time the Publication Tracker is operating in a "simple mode", and only allows for basic data
+                entry.
+            </p>
+            <ol>
+                <li>
+                    <b>authors</b>: array of author names in string format
+                </li>
+                <li>
+                    <b>link</b>: URL that leads to the publication in string format
+                </li>
+                <li>
+                    <b>project_name</b>: free text representation of a FABRIC project in string format
+                </li>
+                <li>
+                    <b>project_uuid</b>: UUID4 reference to a FABRIC project in string format
+                </li>
+                <li>
+                    <b>title</b>: free text representation of the title in string format
+                </li>
+                <li>
+                    <b>year</b>: free text representation of the year in string format
+                </li>
+            </ol>
+            <div class="fa-box" style="background: #264b5d">
+            <pre>
+                <code class="json-view" style="color: whitesmoke">
+    {
+        "authors": [
+            "string"
+        ],
+        "link": "string",
+        "project_name": "string",
+        "project_uuid": "string",
+        "title": "string",
+        "year": "string"
+    }</code>
+                </pre>
+            </div>
+            <br>
+            <h3>User Information (<em style="color: darkcyan; font-size: medium">{{ api_user.name }}</em>)</h3>
+
+            <table class="table table-striped table-bordered my-4">
+                <tbody>
+                <tr>
+                    <td style="width: 25%">Name</td>
+                    <td style="width: 75%"><strong>{{ api_user.name }}</strong></td>
+                </tr>
+                <tr>
+                    <td>Affiliation</td>
+                    <td><strong>{{ api_user.affiliation }}</strong></td>
+                </tr>
+                <tr>
+                    <td>Email</td>
+                    <td><strong>{{ api_user.email }}</strong></td>
+                </tr>
+                <tr>
+                    <td>UUID</td>
+                    <td><strong>{{ api_user.uuid }}</strong></td>
+                </tr>
+                <tr>
+                    <td>CILogon ID</td>
+                    <td><strong>{{ api_user.cilogon_id }}</strong></td>
+                </tr>
+                <tr>
+                    <td>FABRIC Roles</td>
+                    <td><strong>
+                        {% for r in api_user.fabric_roles %}
+                            {{ r }}<br>
+                        {% endfor %}
+                    </strong></td>
+                </tr>
+                <tr>
+                    <td>FABRIC Projects (UUIDs)</td>
+                    <td><strong>
+                        {% for p in api_user.projects %}
+                            {{ p }}<br>
+                        {% endfor %}
+                    </strong></td>
+                </tr>
+                </tbody>
+            </table>
+            <br>
+            <br>
+            <p>
+                <b>DISCLAIMER</b>: The code herein may not be up to date nor compliant with the most recent package
+                and/or
+                security notices. The frequency at which this code is reviewed and updated is based solely on the
+                lifecycle of the project for which it was written to support, and is not actively maintained outside of
+                that scope. Use at your own risk.
+            </p>
+        </div>
+    {% endif %}
+{% endblock %}
