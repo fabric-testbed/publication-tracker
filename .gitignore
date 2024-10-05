@@ -7,14 +7,14 @@
 !/media/.gitkeep
 
 # vouch
-/vouch
+/vouch/
 !/vouch/config.template
 
 # local database volume
 /db_data
 
 # migrations files - only keep init file
-*/migrations
+*/migrations/
 !/publicationtrkr/apps/apiuser/migrations/__init__.py
 !/publicationtrkr/apps/pubsimple/migrations/__init__.py
 
