@@ -4,6 +4,8 @@ from typing import Union
 
 from dateutil import parser
 from django import template
+from publicationtrkr.utils.fabric_auth import is_valid_uuid
+from publicationtrkr.apps.apiuser.models import ApiUser
 
 register = template.Library()
 
@@ -21,6 +23,19 @@ def normalize_date_to_utc(date_str: str) -> Union[None, str]:
     else:
         return None
     return date_parsed
+
+
+@register.filter
+def api_user_name_from_uuid(api_user_uuid: str) -> str:
+    if is_valid_uuid(api_user_uuid):
+        try:
+            api_user_name = ApiUser.objects.get(uuid=api_user_uuid).name
+        except Exception as exc:
+            print(exc)
+            api_user_name = api_user_uuid
+    else:
+        api_user_name = api_user_uuid
+    return api_user_name
 
 
 @register.filter

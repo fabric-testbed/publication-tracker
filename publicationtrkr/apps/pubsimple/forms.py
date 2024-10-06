@@ -29,7 +29,7 @@ class PubSimpleForm(forms.ModelForm):
     link = forms.CharField(
         widget=forms.TextInput(attrs={'size': 60}),
         required=False,
-        label='Link',
+        label='Link (optional)',
     )
 
     year = forms.CharField(
@@ -41,7 +41,7 @@ class PubSimpleForm(forms.ModelForm):
     authors = forms.CharField(
         widget=forms.Textarea(attrs={'rows': 1, 'cols': 20}),
         required=True,
-        label='Authors (as comma separated list)',
+        label='Authors (comma separated)',
     )
 
     project_name = forms.CharField(

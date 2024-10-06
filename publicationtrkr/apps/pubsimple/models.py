@@ -31,7 +31,7 @@ class PubSimple(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
-    link = models.TextField(max_length=5000, blank=True, default=None)
+    link = models.TextField(max_length=5000, blank=True, null=True, default=None)
     modified = models.DateTimeField(auto_now=True)
     modified_by = models.ForeignKey(
         ApiUser,
@@ -39,8 +39,8 @@ class PubSimple(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
-    project_name = models.TextField(max_length=5000, blank=True, default=None)
-    project_uuid = models.CharField(primary_key=False, max_length=255, blank=True, default=None)
+    project_name = models.TextField(max_length=5000, blank=True, null=True, default=None)
+    project_uuid = models.CharField(primary_key=False, max_length=255, blank=True, null=True, default=None)
     title = models.TextField(max_length=5000, blank=False, null=False)
     uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False)
     year = models.CharField(max_length=255, blank=False, null=False)

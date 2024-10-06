@@ -38,6 +38,7 @@ if os.getenv('API_DEBUG').casefold() == 'true':
 else:
     API_DEBUG = False
 
+# Update hosts for production use
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -156,14 +157,24 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Login / Logout settings
+LOGIN_URL = '/login'
+LOGIN_REDIRECT_URL = '/'
+
+LOGOUT_URL = '/logout'
+LOGOUT_REDIRECT_URL = '/'
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'publicationtrkr/server/static'),
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

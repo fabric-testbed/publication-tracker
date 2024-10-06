@@ -1,22 +1,23 @@
 ### Customization
 
 # django static and media files
-/static/
-/media/
 !/static/.gitkeep
 !/media/.gitkeep
+/static/
+/media/
 
 # vouch
-/vouch/
 !/vouch/config.template
+/vouch/
 
 # local database volume
 /db_data
 
 # migrations files - only keep init file
-*/migrations/
 !/publicationtrkr/apps/apiuser/migrations/__init__.py
 !/publicationtrkr/apps/pubsimple/migrations/__init__.py
+/publicationtrkr/apps/apiuser/migrations/
+/publicationtrkr/apps/pubsimple/migrations/
 
 ### PyCharm template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
