@@ -39,13 +39,26 @@ def api_user_name_from_uuid(api_user_uuid: str) -> str:
 
 
 @register.filter
-def generate_portal_url(project_uuid: str) -> Union[None, str]:
+def project_url_from_uuid(project_uuid: str) -> Union[None, str]:
     if len(project_uuid) > 0:
         try:
-            portal_url = str(os.getenv('FABRIC_PORTAL')) + '/projects/' + project_uuid
+            project_url = str(os.getenv('FABRIC_PORTAL')) + '/projects/' + project_uuid
         except Exception as exc:
             print(exc)
             return None
     else:
         return None
-    return portal_url
+    return project_url
+
+
+@register.filter
+def project_url_from_uuid_anonymous(project_uuid: str) -> Union[None, str]:
+    if len(project_uuid) > 0:
+        try:
+            project_url = str(os.getenv('FABRIC_PORTAL')) + '/experiments/public-projects/' + project_uuid
+        except Exception as exc:
+            print(exc)
+            return None
+    else:
+        return None
+    return project_url

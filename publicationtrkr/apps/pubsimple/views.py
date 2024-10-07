@@ -1,5 +1,4 @@
 import json
-import os
 from urllib.parse import parse_qs, urlparse
 
 from django.db import models
@@ -8,17 +7,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 
-from publicationtrkr.apps.pubsimple.forms import PubSimpleForm
-
 from publicationtrkr.apps.pubsimple.api.viewsets import PubSimpleViewSet
+from publicationtrkr.apps.pubsimple.forms import PubSimpleForm
 from publicationtrkr.apps.pubsimple.models import PubSimple
-# from artifactmgr.apps.artifacts.api.author_viewsets import AuthorViewSet
-# from artifactmgr.apps.artifacts.api.validators import validate_artifact_version_create
-# from artifactmgr.apps.artifacts.api.version_viewsets import ArtifactVersionViewSet
-# from artifactmgr.apps.artifacts.forms import ArtifactForm
-# from artifactmgr.apps.artifacts.models import ApiUser, Artifact
 from publicationtrkr.server.settings import API_DEBUG, REST_FRAMEWORK
-# from artifactmgr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
 from publicationtrkr.utils.fabric_auth import get_api_user
 
 
@@ -42,7 +34,6 @@ def pubsimple_list(request):
                   {
                       'api_user': api_user.as_dict(),
                       'simplepubs': simplepubs.get('list_objects', {}),
-                      'projects_url': 'https://alpha-4.fabric-testbed.net/projects',
                       'item_range': simplepubs.get('item_range', None),
                       'message': message,
                       'next_page': simplepubs.get('next_page', None),
@@ -84,6 +75,7 @@ def pubsimple_create(request):
                       'api_user': api_user.as_dict(),
                   })
 
+
 def pubsimple_update(request, *args, **kwargs):
     api_user = get_api_user(request=request)
     pubsimple_uuid = kwargs.get('uuid')
@@ -108,7 +100,7 @@ def pubsimple_update(request, *args, **kwargs):
         else:
             message = 'ValidationError: ' + str(form.errors.as_text())
     else:
-        form = PubSimpleForm(instance=pubsimple, authors=[a for a in pubsimple.authors] )
+        form = PubSimpleForm(instance=pubsimple, authors=[a for a in pubsimple.authors])
     return render(request,
                   'pubsimple_update.html',
                   {
@@ -118,6 +110,7 @@ def pubsimple_update(request, *args, **kwargs):
                       'form': form,
                       'message': message
                   })
+
 
 def pubsimple_detail(request, *args, **kwargs):
     api_user = get_api_user(request=request)
