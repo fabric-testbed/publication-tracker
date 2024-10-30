@@ -1,5 +1,8 @@
 ### Customization
 
+# local self-signed ssl certs
+/ssl/*.pem
+
 # django static and media files
 !/static/.gitkeep
 !/media/.gitkeep
