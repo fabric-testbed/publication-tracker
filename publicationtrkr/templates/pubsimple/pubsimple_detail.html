@@ -64,40 +64,44 @@
             <tr>
                 <td>Created</td>
                 <td>
-                    {{ publication.created|normalize_date_to_utc }} ({{ publication.created_by|api_user_name_from_uuid }})
+                    {{ publication.created|normalize_date_to_utc }}
+                    ({{ publication.created_by|api_user_name_from_uuid }})
                 </td>
             </tr>
             <tr>
                 <td>Modified</td>
                 <td>
-                    {{ publication.modified|normalize_date_to_utc }} ({{ publication.modified_by|api_user_name_from_uuid }})
+                    {{ publication.modified|normalize_date_to_utc }}
+                    ({{ publication.modified_by|api_user_name_from_uuid }})
                 </td>
             </tr>
         </table>
         <br>
-        <div>
-            <form action="{% url 'pubsimple_detail' uuid=publication.uuid %}"
-                  method="POST">
-                {% csrf_token %}
-                {% if is_author %}
-                    <button class="btn btn-danger" type="submit"
-                            style="margin-left: 10px; float: right"
-                            name="pubsimple_detail_button" value="delete_pubsimple">
-                        <a onclick="return confirm('Delete Publication: {{ publication.title }}?')">
-                            Delete
-                        </a>
+        {% if not message %}
+            <div>
+                <form action="{% url 'pubsimple_detail' uuid=publication.uuid %}"
+                      method="POST">
+                    {% csrf_token %}
+                    {% if is_author or api_user.is_publication_tracker_admin %}
+                        <button class="btn btn-danger" type="submit"
+                                style="margin-left: 10px; float: right"
+                                name="pubsimple_detail_button" value="delete_pubsimple">
+                            <a onclick="return confirm('Delete Publication: {{ publication.title }}?')">
+                                Delete
+                            </a>
+                        </button>
+                        <input type="hidden" name="pubsimple_uuid" value="{{ publication.uuid }}">
+                        <button class="btn btn-success mr-2" style="margin-left: 10px; float: right">
+                            <a href="{% url 'pubsimple_update' uuid=publication.uuid %}"
+                               class="unlink">Edit</a>
+                        </button>
+                    {% endif %}
+                    <button class="btn btn-secondary mr-2" value="cancel">
+                        <a href="{% url 'pubsimple_list' %}" class="unlink">Back</a>
                     </button>
-                    <input type="hidden" name="pubsimple_uuid" value="{{ publication.uuid }}">
-                    <button class="btn btn-success mr-2" style="margin-left: 10px; float: right">
-                        <a href="{% url 'pubsimple_update' uuid=publication.uuid %}"
-                           class="unlink">Edit</a>
-                    </button>
-                {% endif %}
-                <button class="btn btn-secondary mr-2" value="cancel">
-                    <a href="{% url 'pubsimple_list' %}" class="unlink">Back</a>
-                </button>
-            </form>
-        </div>
+                </form>
+            </div>
+        {% endif %}
     </div>
     {% if debug %}
         <hr>

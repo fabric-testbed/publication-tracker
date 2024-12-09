@@ -67,6 +67,8 @@ fi
 if [[ "${LOAD_FIXTURES}" -eq 1 ]]; then
     echo "### LOAD_FIXTURES = True ###"
     FIXTURES_LIST=(
+        "apiuser"
+        "pubsimple"
     )
 else
     echo "### LOAD_FIXTURES = False ###"

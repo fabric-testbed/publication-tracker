@@ -18,6 +18,7 @@
 
 # local fixture files
 /dumpdata/*.json
+/publicationtrkr/apps/pubsimple/fixtures/*.json
 
 # migrations files - only keep init file
 !/publicationtrkr/apps/apiuser/migrations/__init__.py
