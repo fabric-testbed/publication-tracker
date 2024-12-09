@@ -16,6 +16,9 @@
 # local database volume
 /db_data
 
+# local fixture files
+/dumpdata/*.json
+
 # migrations files - only keep init file
 !/publicationtrkr/apps/apiuser/migrations/__init__.py
 !/publicationtrkr/apps/pubsimple/migrations/__init__.py
