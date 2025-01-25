@@ -59,6 +59,10 @@
                         <br>
                         <b>Year: </b>{{ pub.year }}
                         <br>
+                        {% if pub.venue %}
+                            <b>Venue: </b>{{ pub.venue }}
+                            <br>
+                        {% endif %}
                         {% if pub.project_name %}
                             <b>Project: </b>
                             {% if api_user.is_authenticated %}

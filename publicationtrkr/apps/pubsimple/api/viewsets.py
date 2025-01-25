@@ -133,6 +133,12 @@ class PubSimpleViewSet(viewsets.ModelViewSet):
                     pubsimple.title = request_data.get('title', None)
                     # uuid
                     pubsimple.uuid = str(uuid4())
+                    # venue
+                    venue = request_data.get('venue', None)
+                    if venue in ['', "", None]:
+                        pubsimple.venue = None
+                    else:
+                        pubsimple.venue = venue
                     # year
                     pubsimple.year = request_data.get('year', None)
                     # save to db
@@ -181,33 +187,43 @@ class PubSimpleViewSet(viewsets.ModelViewSet):
                 if request_data.get('authors', None):
                     pubsimple.authors = request_data.get('authors', [])
                 # link
-                link = request_data.get('link', None)
-                if link in ['', "", None]:
-                    pubsimple.link = None
-                else:
-                    pubsimple.link = link
+                if request_data.get('link', None):
+                    link = request_data.get('link')
+                    if link in ['', ""]:
+                        pubsimple.link = None
+                    else:
+                        pubsimple.link = link
                 # modified
                 pubsimple.modified = now
                 # modified_by
                 pubsimple.modified_by = api_user
                 # project_name
-                project_name = request_data.get('project_name', None)
-                if project_name in ['', "", None]:
-                    pubsimple.project_name = None
-                else:
-                    pubsimple.project_name = project_name
+                if request_data.get('project_name', None):
+                    project_name = request_data.get('project_name')
+                    if project_name in ['', ""]:
+                        pubsimple.project_name = None
+                    else:
+                        pubsimple.project_name = project_name
                 # project_uuid
-                project_uuid = request_data.get('project_uuid', None)
-                if project_uuid in ['', "", None]:
-                    pubsimple.project_uuid = None
-                else:
-                    pubsimple.project_uuid = project_uuid
+                if request_data.get('project_uuid', None):
+                    project_uuid = request_data.get('project_uuid')
+                    if project_uuid in ['', ""]:
+                        pubsimple.project_uuid = None
+                    else:
+                        pubsimple.project_uuid = project_uuid
                 # get project_name if not provided and project_uuid is given
                 if pubsimple.project_uuid and not pubsimple.project_name:
                     pubsimple.project_name = get_project_name_from_uuid(request, pubsimple.project_uuid, api_user)
                 # title
                 if request_data.get('title', None):
                     pubsimple.title = request_data.get('title', None)
+                # venue
+                if request_data.get('venue', None):
+                    venue = request_data.get('venue')
+                    if venue in ['', ""]:
+                        pubsimple.venue = None
+                    else:
+                        pubsimple.venue = venue
                 # year
                 if request_data.get('year', None):
                     pubsimple.year = request_data.get('year', None)

@@ -21,6 +21,7 @@ class PubSimple(models.Model):
     - project_uuid
     - title
     - uuid
+    - venue
     - year
     """
     authors = ArrayField(models.CharField(max_length=255, blank=False, null=False), default=list)
@@ -43,6 +44,7 @@ class PubSimple(models.Model):
     project_uuid = models.CharField(primary_key=False, max_length=255, blank=True, null=True, default=None)
     title = models.TextField(max_length=5000, blank=False, null=False)
     uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False)
+    venue = models.CharField(max_length=255, blank=True, null=True, default=None)
     year = models.CharField(max_length=255, blank=False, null=False)
 
     class Meta:
@@ -59,6 +61,7 @@ class PubSimple(models.Model):
             'project_uuid': self.project_uuid,
             'title': self.title,
             'uuid': self.uuid,
+            'venue': self.venue,
             'year': self.year,
         }
 

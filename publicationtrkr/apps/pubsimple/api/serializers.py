@@ -16,6 +16,7 @@ class PubSimpleSerializer(serializers.ModelSerializer):
     - project_uuid
     - title
     - uuid
+    - venue
     - year
     """
     created = serializers.SerializerMethodField(method_name='get_created')
@@ -27,7 +28,7 @@ class PubSimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = PubSimple
         fields = ['authors', 'created', 'created_by', 'link', 'modified', 'modified_by', 'project_name',
-                  'project_uuid', 'title', 'uuid', 'year']
+                  'project_uuid', 'title', 'uuid', 'venue', 'year']
 
     @staticmethod
     def get_created(self) -> str:
@@ -54,10 +55,11 @@ class PubSimpleCreateSerializer(serializers.ModelSerializer):
     - project_name
     - project_uuid
     - title
+    - venue
     - year
     """
     lookup_field = 'uuid'
 
     class Meta:
         model = PubSimple
-        fields = ['authors', 'link', 'project_name', 'project_uuid', 'title', 'year']
+        fields = ['authors', 'link', 'project_name', 'project_uuid', 'title', 'venue', 'year']
