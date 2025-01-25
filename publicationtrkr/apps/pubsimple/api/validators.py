@@ -12,6 +12,7 @@ def validate_pubsimple_create(request, api_user: ApiUser) -> tuple:
     - 'project_name': 'string' - optional
     - 'project_uuid': 'string' - optional
     - 'title': 'string' - required
+    - 'venue': 'string' - optional
     - 'year': 'string' - required
     """
     message = []
@@ -47,6 +48,8 @@ def validate_pubsimple_create(request, api_user: ApiUser) -> tuple:
         title = request_data.get('title', None)
         if not title:
             message.append({'title': 'must provide a title'})
+        # 'venue': 'string' - optional
+        venue = request_data.get('venue', None)
         # 'year': 'string' - required
         year = request_data.get('year', None)
         if not year:
@@ -67,6 +70,7 @@ def validate_pubsimple_update(request, api_user: ApiUser) -> tuple:
     - 'project_name': 'string' - optional
     - 'project_uuid': 'string' - optional
     - 'title': 'string' - optional
+    - 'venue': 'string' - optional
     - 'year': 'string' - optional
     """
     message = []
@@ -100,6 +104,8 @@ def validate_pubsimple_update(request, api_user: ApiUser) -> tuple:
                 message.append({'project_name': 'does not match name found for project_uuid: \'{0}\''.format(project_uuid)})
         # 'title': 'string' - optional
         title = request_data.get('title', None)
+        # 'venue': 'string' - optional
+        venue = request_data.get('venue', None)
         # 'year': 'string' - optional
         year = request_data.get('year', None)
     except Exception as exc:

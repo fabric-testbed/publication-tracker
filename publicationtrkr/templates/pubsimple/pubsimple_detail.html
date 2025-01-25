@@ -45,6 +45,14 @@
                     {{ publication.year }}
                 </td>
             </tr>
+            {% if publication.venue %}
+                <tr>
+                    <td>Venue</td>
+                    <td>
+                        {{ publication.venue }}
+                    </td>
+                </tr>
+            {% endif %}
             {% if publication.project_name %}
                 <tr>
                     <td>Project Name</td>

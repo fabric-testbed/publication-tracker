@@ -15,6 +15,7 @@ class PubSimpleForm(forms.ModelForm):
       "project_name": "string",
       "project_uuid": "string",
       "title": "string",
+      "venue": "string",
       "year": "string"
     }
     """
@@ -36,6 +37,12 @@ class PubSimpleForm(forms.ModelForm):
         widget=forms.TextInput(attrs={'size': 60}),
         required=True,
         label='Year',
+    )
+
+    venue = forms.CharField(
+        widget=forms.TextInput(attrs={'size': 60}),
+        required=False,
+        label='Venue',
     )
 
     authors = forms.CharField(
@@ -66,4 +73,4 @@ class PubSimpleForm(forms.ModelForm):
 
     class Meta:
         model = PubSimple
-        fields = ['title', 'authors', 'link', 'year', 'project_name', 'project_uuid']
+        fields = ['title', 'authors', 'link', 'year', 'venue', 'project_name', 'project_uuid']
