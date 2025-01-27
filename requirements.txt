@@ -1,6 +1,7 @@
 cryptography
 Django
 django-bootstrap5
+django-cors-headers
 django-filter
 djangorestframework
 drf-spectacular
