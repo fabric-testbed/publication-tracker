@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 publications_tags %}
+
+{% block title %}
+    Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    {% if api_user.is_authenticated %}
+        {% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}
+            <div class="container w-85">
+                <div class="page-header">
+                    <h3>Edit Author</h3>
+                    <span class="subtitle">Update author details and FABRIC identity link</span>
+                </div>
+
+                <div class="detail-card mb-3">
+                    <div class="detail-row">
+                        <div class="detail-label">Author UUID</div>
+                        <div class="detail-value"><code>{{ author.uuid }}</code></div>
+                    </div>
+                    {% if not api_user.is_publication_tracker_admin %}
+                        <div class="detail-row">
+                            <div class="detail-label">Author Name</div>
+                            <div class="detail-value">{{ author.author_name }}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">Publication</div>
+                            <div class="detail-value">
+                                <a href="{% url 'publication_detail' uuid=author.publication_uuid %}"
+                                   title="View this publication"
+                                   data-bs-toggle="tooltip" data-bs-placement="right">
+                                    {{ author.publication_uuid }}
+                                </a>
+                            </div>
+                        </div>
+                        {% if author.fabric_uuid %}
+                            <div class="detail-row">
+                                <div class="detail-label">FABRIC UUID</div>
+                                <div class="detail-value"><code>{{ author.fabric_uuid }}</code></div>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+
+                <div class="form-card">
+                    <form id="form" method="POST" class="form-group">
+                        {% csrf_token %}
+                        <p>
+                            {{ form.display_name.label_tag }} {{ form.display_name }}
+                        </p>
+                        {% if api_user.is_publication_tracker_admin %}
+                            <p>
+                                {{ form.author_name.label_tag }} {{ form.author_name }}
+                            </p>
+                            <p>
+                                {{ form.publication_uuid.label_tag }} {{ form.publication_uuid }}
+                                <br>
+                                <small class="text-muted">Must match an existing publication UUID. Changing this will move the author to the new publication.</small>
+                            </p>
+                            <p>
+                                {{ form.fabric_uuid.label_tag }} {{ form.fabric_uuid }}
+                                <br>
+                                <small class="text-muted">Must match an existing FABRIC user UUID, or leave blank to disassociate.</small>
+                            </p>
+                        {% else %}
+                            <p>
+                                <small class="text-muted">
+                                    <i class="fa fa-circle-info me-1"></i>
+                                    Saving will claim this author entry and associate it with your FABRIC identity
+                                    (<code>{{ api_user.uuid }}</code>).
+                                </small>
+                            </p>
+                        {% endif %}
+                    </form>
+                </div>
+
+                <div class="action-row">
+                    <button class="btn btn-success btn-fabric" type="submit" form="form" name="save"
+                            title="Save changes to this author"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-floppy-disk me-1"></i> Save
+                    </button>
+                    <a href="{% url 'publication_detail' uuid=author.publication_uuid %}" class="btn btn-secondary btn-fabric"
+                       title="Discard changes and return to the publication"
+                       data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-arrow-left me-1"></i> Back
+                    </a>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-warning d-flex align-items-center" role="alert">
+                <i class="fa fa-triangle-exclamation me-2"></i>
+                You are not able to edit an Author.
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="alert alert-warning d-flex align-items-center" role="alert">
+            <i class="fa fa-triangle-exclamation me-2"></i>
+            You are not logged in. Please login first to edit an author.
+        </div>
+        <a href="/login" class="btn btn-success btn-fabric"
+           title="Log in with your FABRIC identity"
+           data-bs-toggle="tooltip" data-bs-placement="right">
+            <i class="fa fa-right-to-bracket me-1"></i> Login
+        </a>
+    {% endif %}
+    {% if debug %}
+        <hr>
+        <pre><strong>form</strong>:<br>{{ form.data|pprint }}</pre>
+        <pre><strong>author</strong>:<br>{{ author|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

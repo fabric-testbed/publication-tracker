@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% load static publications_tags django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    <div class="container w-85">
+        <div class="page-header">
+            <h2>Publications by Project</h2>
+            <span class="subtitle">Browse FABRIC projects and their associated publications</span>
+        </div>
+        <form method="get">
+            {% csrf_token %}
+            <div class="d-flex flex-row justify-content-between align-items-center gap-2 mb-2">
+                {% if search %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar" value="{{ search }}">
+                {% else %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar"
+                           placeholder="Search by project name (3 or more characters)...">
+                {% endif %}
+                <button class="btn btn-primary btn-fabric" id="search_submit" type="submit"
+                        title="Search projects by name"
+                        data-bs-toggle="tooltip" data-bs-placement="bottom">
+                    <i class="fa fa-magnifying-glass me-1"></i> Search
+                </button>
+            </div>
+            {% if search and search|length < 3 %}
+                <small class="text-danger"><i class="fa fa-circle-exclamation me-1"></i>Search term must be at least 3 characters.</small>
+            {% else %}
+                <small class="text-muted">Search matches against project name.</small>
+            {% endif %}
+        </form>
+
+        <table class="soft-table my-4">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">Count</th>
+                    <th>FABRIC Project Name</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for project in projects %}
+                <tr>
+                    <td>
+                        <span class="pub-badge">{{ project.pub_count }}</span>
+                    </td>
+                    <td>
+                        <a href="{% url 'publication_project_detail' project_uuid=project.project_uuid %}"
+                           title="View all publications for {{ project.project_name }}"
+                           data-bs-toggle="tooltip" data-bs-placement="right">
+                            {{ project.project_name }}
+                        </a>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="2">
+                        <div class="empty-state">
+                            <i class="fa fa-diagram-project fa-2x"></i>
+                            {% if search %}
+                                No projects found matching <em>{{ search }}</em>.
+                            {% else %}
+                                No projects found.
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
+            {% if prev_page %}
+                {% if search %}
+                    <a href="?page={{ prev_page }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% else %}
+                    <a href="?page={{ prev_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-left"></i>
+                </span>
+            {% endif %}
+
+            <span class="results-count">{{ item_range }} of {{ count }} results</span>
+
+            {% if next_page %}
+                {% if search %}
+                    <a href="?page={{ next_page }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% else %}
+                    <a href="?page={{ next_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-right"></i>
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    {% if debug %}
+        <hr>
+        <pre><strong>projects</strong>:<br>{{ projects|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

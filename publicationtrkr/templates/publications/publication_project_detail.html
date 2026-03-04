@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% load static publications_tags django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    <div class="container w-85">
+        <div class="page-header">
+            <h2>Publications</h2>
+            <span class="subtitle">
+                <i class="fa fa-diagram-project me-1"></i> Project: {{ project_name }}
+                <code class="ms-1">{{ project_uuid }}</code>
+            </span>
+        </div>
+        <form method="get">
+            {% csrf_token %}
+            <div class="d-flex flex-row justify-content-between align-items-center gap-2 mb-3">
+                {% if search %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar" value="{{ search }}">
+                {% else %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar"
+                           placeholder="Search by title or project name...">
+                {% endif %}
+                <button class="btn btn-primary btn-fabric" id="search_submit" type="submit"
+                        title="Search publications within this project"
+                        data-bs-toggle="tooltip" data-bs-placement="bottom">
+                    <i class="fa fa-magnifying-glass me-1"></i> Search
+                </button>
+            </div>
+        </form>
+
+        <div class="pub-list">
+            {% for pub in publications %}
+                <div class="pub-card">
+                    <div class="pub-title">
+                        <a href="{% url 'publication_detail' uuid=pub.uuid %}"
+                           title="View full details for this publication">
+                            {{ pub.title }}
+                        </a>
+                        {% if pub.link %}
+                            <a href="{{ pub.link }}" target="_blank" rel="noopener"
+                               class="pub-source-link ms-1"
+                               title="Open the original publication source in a new tab"
+                               data-bs-toggle="tooltip" data-bs-placement="right">
+                                <i class="fa fa-arrow-up-right-from-square"></i> source
+                            </a>
+                        {% endif %}
+                    </div>
+                    <div class="pub-meta">
+                        <div class="pub-authors">
+                            <span class="pub-meta-label">Authors:</span>
+                            {% for author in pub.authors %}
+                                {{ author.display_name }}{% if not forloop.last %},{% endif %}
+                            {% endfor %}
+                        </div>
+                        <div class="mt-1">
+                            <span class="pub-badge" title="Publication year">
+                                <i class="fa fa-calendar-days me-1"></i>{{ pub.year }}
+                            </span>
+                            {% if pub.venue %}
+                                <span class="pub-badge" title="Publication venue or conference">
+                                    <i class="fa fa-building-columns me-1"></i>{{ pub.venue }}
+                                </span>
+                            {% endif %}
+                            {% if pub.project_name %}
+                                <span class="pub-badge pub-badge-project">
+                                    <i class="fa fa-diagram-project me-1"></i>
+                                    {% if api_user.is_authenticated %}
+                                        <a href="{{ pub.project_uuid|project_url_from_uuid }}" target="_blank"
+                                           rel="noopener"
+                                           title="View the {{ pub.project_name }} project on the FABRIC Portal"
+                                           data-bs-toggle="tooltip" data-bs-placement="top">
+                                            {{ pub.project_name }}
+                                        </a>
+                                    {% else %}
+                                        <a href="{{ pub.project_uuid|project_url_from_uuid_anonymous }}" target="_blank"
+                                           rel="noopener"
+                                           title="View the {{ pub.project_name }} project on the FABRIC Portal"
+                                           data-bs-toggle="tooltip" data-bs-placement="top">
+                                            {{ pub.project_name }}
+                                        </a>
+                                    {% endif %}
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="empty-state">
+                    <i class="fa fa-book-open fa-2x"></i>
+                    {% if search %}
+                        No publications found matching <em>{{ search }}</em>.
+                    {% else %}
+                        No publications found for this project.
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
+            {% if prev_page %}
+                {% if search %}
+                    <a href="?page={{ prev_page }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% else %}
+                    <a href="?page={{ prev_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-left"></i>
+                </span>
+            {% endif %}
+
+            <span class="results-count">{{ item_range }} of {{ count }} results</span>
+
+            {% if next_page %}
+                {% if search %}
+                    <a href="?page={{ next_page }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% else %}
+                    <a href="?page={{ next_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-right"></i>
+                </span>
+            {% endif %}
+        </div>
+
+        <div class="mt-3">
+            <a href="{% url 'publication_project_list' %}" class="btn btn-secondary btn-fabric"
+               title="Return to the projects list"
+               data-bs-toggle="tooltip" data-bs-placement="right">
+                <i class="fa fa-arrow-left me-1"></i> Back
+            </a>
+        </div>
+    </div>
+    {% if debug %}
+        <hr>
+        <pre><strong>publications</strong>:<br>{{ publications|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

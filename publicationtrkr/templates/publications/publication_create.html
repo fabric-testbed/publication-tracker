@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+
+{% block title %}
+    Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    {% if api_user.is_authenticated %}
+        {% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}
+            <div class="container w-85">
+                <div class="page-header">
+                    <h3>Create Publication</h3>
+                    <span class="subtitle">Add a new research publication to the tracker</span>
+                </div>
+                <div class="form-card">
+                    <form id="form" method="POST" class="form-group">
+                        {% csrf_token %}
+                        <p>
+                            {{ form.bibtex.label_tag }} {{ form.bibtex }}
+                            <small class="text-muted">Paste a BibTeX entry to auto-fill the fields below. Manual values override BibTeX.</small>
+                        </p>
+                        <hr class="form-divider">
+                        <p>
+                            {{ form.title.label_tag }} {{ form.title }}
+                        </p>
+                        <p>
+                            {{ form.authors.label_tag }} {{ form.authors }}
+                        </p>
+                        <p>
+                            {{ form.link.label_tag }} {{ form.link }}
+                        </p>
+                        <p>
+                            {{ form.year.label_tag }} {{ form.year }}
+                        </p>
+                        <p>
+                            {{ form.venue.label_tag }} {{ form.venue }}
+                        </p>
+                        <p>
+                            {{ form.project_uuid.label_tag }} {{ form.project_uuid }}
+                        </p>
+                        <p>
+                            {{ form.project_name.label_tag }} {{ form.project_name }}
+                        </p>
+                    </form>
+                </div>
+                <div class="action-row">
+                    <button class="btn btn-success btn-fabric" type="submit" form="form" name="save"
+                            title="Save this publication"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-floppy-disk me-1"></i> Save
+                    </button>
+                    <a href="{% url 'publication_list' %}" class="btn btn-secondary btn-fabric"
+                       title="Discard changes and return to the publications list"
+                       data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-arrow-left me-1"></i> Back
+                    </a>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-warning d-flex align-items-center" role="alert">
+                <i class="fa fa-triangle-exclamation me-2"></i>
+                You are not able to create a Publication.
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="alert alert-warning d-flex align-items-center" role="alert">
+            <i class="fa fa-triangle-exclamation me-2"></i>
+            You are not logged in. Please login first to create a publication.
+        </div>
+        <a href="/login" class="btn btn-success btn-fabric"
+           title="Log in with your FABRIC identity"
+           data-bs-toggle="tooltip" data-bs-placement="right">
+            <i class="fa fa-right-to-bracket me-1"></i> Login
+        </a>
+    {% endif %}
+    {% if debug %}
+        <hr>
+        <pre><strong>form</strong>:<br>{{ form.data|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

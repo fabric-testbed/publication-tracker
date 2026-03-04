@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if not api_user.is_publication_tracker_admin %}
+        <div class="container w-85 mt-4">
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <i class="fa fa-lock me-2"></i>
+                PermissionDenied: you do not have permission to view this page.
+            </div>
+        </div>
+    {% else %}
+        {% if message %}
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <i class="fa fa-circle-exclamation me-2"></i>
+                {{ message }}
+            </div>
+        {% endif %}
+        <div class="container w-85">
+            <div class="page-header">
+                <h3>{{ apiuser.name }}</h3>
+                <span class="subtitle">FABRIC user account details</span>
+            </div>
+
+            <div class="detail-card">
+                <div class="detail-row">
+                    <div class="detail-label">Name</div>
+                    <div class="detail-value">{{ apiuser.name }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Email</div>
+                    <div class="detail-value">{{ apiuser.email }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">UUID</div>
+                    <div class="detail-value">
+                        <code>{{ apiuser.uuid }}</code>
+                        <button type="button" class="btn-copy"
+                                onclick="copyToClipboard(this, '{{ apiuser.uuid }}')"
+                                title="Copy UUID to clipboard"
+                                data-bs-toggle="tooltip" data-bs-placement="right">
+                            <i class="fa fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Affiliation</div>
+                    <div class="detail-value">{{ apiuser.affiliation }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">CILogon ID</div>
+                    <div class="detail-value"><code>{{ apiuser.cilogon_id }}</code></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Access Type</div>
+                    <div class="detail-value">{{ apiuser.access_type }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Access Expires</div>
+                    <div class="detail-value">{{ apiuser.access_expires }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Can Create Pub</div>
+                    <div class="detail-value">
+                        {% if apiuser.can_create_publication %}
+                            <span class="pub-badge pub-badge-project"><i class="fa fa-check me-1"></i>Yes</span>
+                        {% else %}
+                            <span class="text-muted">No</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Is Admin</div>
+                    <div class="detail-value">
+                        {% if apiuser.is_publication_tracker_admin %}
+                            <span class="pub-badge pub-badge-project"><i class="fa fa-shield-halved me-1"></i>Yes</span>
+                        {% else %}
+                            <span class="text-muted">No</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">FABRIC Roles</div>
+                    <div class="detail-value">
+                        {% if apiuser.fabric_roles %}
+                            {% for role in apiuser.fabric_roles %}
+                                <span class="pub-badge mb-1">{{ role }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <em class="text-muted">None</em>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Projects</div>
+                    <div class="detail-value">
+                        {% if apiuser.projects %}
+                            {% for project in apiuser.projects %}
+                                <code class="d-block mb-1">{{ project }}</code>
+                            {% endfor %}
+                        {% else %}
+                            <em class="text-muted">None</em>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-row">
+                <a href="{% url 'apiuser_list' %}" class="btn btn-secondary btn-fabric"
+                   title="Return to the API users list"
+                   data-bs-toggle="tooltip" data-bs-placement="right">
+                    <i class="fa fa-arrow-left me-1"></i> Back
+                </a>
+            </div>
+        </div>
+        {% if debug %}
+            <hr>
+            <pre><strong>apiuser</strong>:<br>{{ apiuser|pprint }}</pre>
+            <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+            <br>
+        {% endif %}
+    {% endif %}
+{% endblock %}

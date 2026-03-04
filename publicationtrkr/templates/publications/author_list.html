@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% load static publications_tags django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    <div class="container w-85">
+        <div class="page-header">
+            <h2>Authors</h2>
+            <span class="subtitle">Browse and search publication authors</span>
+        </div>
+        <form method="get">
+            {% csrf_token %}
+            <div class="d-flex flex-row justify-content-between align-items-center gap-2 mb-2">
+                {% if search %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar" value="{{ search }}">
+                {% else %}
+                    <input id="search" type="text" name="search" class="form-control w-75 search-bar"
+                           placeholder="Search authors by name (3 or more characters)...">
+                {% endif %}
+                <button class="btn btn-primary btn-fabric" id="search_submit" type="submit"
+                        title="Search authors by name"
+                        data-bs-toggle="tooltip" data-bs-placement="bottom">
+                    <i class="fa fa-magnifying-glass me-1"></i> Search
+                </button>
+            </div>
+            {% if search and search|length < 3 %}
+                <small class="text-danger"><i class="fa fa-circle-exclamation me-1"></i>Search term must be at least 3 characters.</small>
+            {% else %}
+                <small class="text-muted">Search matches against author name and display name.</small>
+            {% endif %}
+        </form>
+
+        <table class="soft-table my-4">
+            <thead>
+                <tr>
+                    <th>Author Name</th>
+                    <th>Display Name</th>
+                    <th>Publication</th>
+                    <th>FABRIC Linked</th>
+                    {% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}
+                        <th style="width: 70px;"></th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+            {% for author in authors.results %}
+                <tr>
+                    <td>{{ author.author_name }}</td>
+                    <td>
+                        {% if author.display_name != author.author_name %}
+                            {{ author.display_name }}
+                        {% else %}
+                            <em class="text-muted">{{ author.display_name }}</em>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'publication_detail' uuid=author.publication_uuid %}"
+                           title="View the associated publication"
+                           data-bs-toggle="tooltip" data-bs-placement="top">
+                            {{ author.publication_uuid|publication_title_from_uuid }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if author.fabric_uuid %}
+                            <a href="{% url 'publication_author_detail' fabric_uuid=author.fabric_uuid %}"
+                               title="View all publications by this FABRIC user"
+                               data-bs-toggle="tooltip" data-bs-placement="top">
+                                <span class="pub-badge pub-badge-project"><i class="fa fa-link me-1"></i>Yes</span>
+                            </a>
+                        {% else %}
+                            <span class="text-muted">No</span>
+                        {% endif %}
+                    </td>
+                    {% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}
+                        <td>
+                            <a href="{% url 'author_update' uuid=author.uuid %}" class="btn btn-sm btn-success btn-fabric"
+                               title="Edit this author's details"
+                               data-bs-toggle="tooltip" data-bs-placement="left">
+                                <i class="fa fa-pen-to-square"></i>
+                            </a>
+                        </td>
+                    {% endif %}
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="{% if api_user.can_create_publication or api_user.is_publication_tracker_admin %}5{% else %}4{% endif %}">
+                        <div class="empty-state">
+                            <i class="fa fa-users fa-2x"></i>
+                            {% if search %}
+                                No authors found matching <em>{{ search }}</em>.
+                            {% else %}
+                                No authors found.
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
+            {% if prev_page %}
+                {% if search %}
+                    <a href="{{ authors.previous }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% else %}
+                    <a href="{{ authors.previous }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-left"></i>
+                </span>
+            {% endif %}
+
+            <span class="results-count">{{ item_range }} of {{ count }} results</span>
+
+            {% if next_page %}
+                {% if search %}
+                    <a href="{{ authors.next }}&search={{ search }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% else %}
+                    <a href="{{ authors.next }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% endif %}
+            {% else %}
+                <span class="btn btn-outline-secondary btn-sm disabled">
+                    <i class="fa fa-angles-right"></i>
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    {% if debug %}
+        <hr>
+        <pre><strong>authors</strong>:<br>{{ authors|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

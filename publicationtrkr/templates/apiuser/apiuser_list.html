@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if not api_user.is_publication_tracker_admin %}
+        <div class="container w-85 mt-4">
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <i class="fa fa-lock me-2"></i>
+                PermissionDenied: you do not have permission to view this page.
+            </div>
+        </div>
+    {% else %}
+        {% if message %}
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <i class="fa fa-circle-exclamation me-2"></i>
+                {{ message }}
+            </div>
+        {% endif %}
+        <div class="container w-85">
+            <div class="page-header">
+                <h2>API Users</h2>
+                <span class="subtitle">Manage FABRIC user accounts registered with the Publication Tracker</span>
+            </div>
+            <form method="get">
+                {% csrf_token %}
+                <div class="d-flex flex-row justify-content-between align-items-center gap-2 mb-2">
+                    {% if search %}
+                        <input id="search" type="text" name="search" class="form-control w-75 search-bar" value="{{ search }}">
+                    {% else %}
+                        <input id="search" type="text" name="search" class="form-control w-75 search-bar"
+                               placeholder="Search by name, email, or affiliation (3 or more characters)...">
+                    {% endif %}
+                    <button class="btn btn-primary btn-fabric" id="search_submit" type="submit"
+                            title="Search users by name, email, or affiliation"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-magnifying-glass me-1"></i> Search
+                    </button>
+                </div>
+                {% if search and search|length < 3 %}
+                    <small class="text-danger"><i class="fa fa-circle-exclamation me-1"></i>Search term must be at least 3 characters.</small>
+                {% else %}
+                    <small class="text-muted">Search matches against name, email, and affiliation.</small>
+                {% endif %}
+            </form>
+
+            <table class="soft-table my-4">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>UUID</th>
+                        <th>Affiliation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for user in api_users %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'apiuser_detail' uuid=user.uuid %}"
+                               title="View full user details for {{ user.name }}"
+                               data-bs-toggle="tooltip" data-bs-placement="right">
+                                {{ user.name }}
+                            </a>
+                        </td>
+                        <td>{{ user.email }}</td>
+                        <td>
+                            <code>{{ user.uuid }}</code>
+                            <button type="button" class="btn-copy btn-copy-sm"
+                                    onclick="copyToClipboard(this, '{{ user.uuid }}')"
+                                    title="Copy UUID to clipboard"
+                                    data-bs-toggle="tooltip" data-bs-placement="top">
+                                <i class="fa fa-copy"></i>
+                            </button>
+                        </td>
+                        <td>{{ user.affiliation }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="4">
+                            <div class="empty-state">
+                                <i class="fa fa-users fa-2x"></i>
+                                {% if search %}
+                                    No users found matching <em>{{ search }}</em>.
+                                {% else %}
+                                    No users found.
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
+                {% if prev_page %}
+                    {% if search %}
+                        <a href="?page={{ prev_page }}&search={{ search }}"
+                           class="btn btn-outline-primary btn-sm"
+                           title="Go to page {{ prev_page }}"
+                           data-bs-toggle="tooltip" data-bs-placement="left">
+                            <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                        </a>
+                    {% else %}
+                        <a href="?page={{ prev_page }}"
+                           class="btn btn-outline-primary btn-sm"
+                           title="Go to page {{ prev_page }}"
+                           data-bs-toggle="tooltip" data-bs-placement="left">
+                            <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                        </a>
+                    {% endif %}
+                {% else %}
+                    <span class="btn btn-outline-secondary btn-sm disabled">
+                        <i class="fa fa-angles-left"></i>
+                    </span>
+                {% endif %}
+
+                <span class="results-count">{{ item_range }} of {{ count }} results</span>
+
+                {% if next_page %}
+                    {% if search %}
+                        <a href="?page={{ next_page }}&search={{ search }}"
+                           class="btn btn-outline-primary btn-sm"
+                           title="Go to page {{ next_page }}"
+                           data-bs-toggle="tooltip" data-bs-placement="right">
+                            Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                        </a>
+                    {% else %}
+                        <a href="?page={{ next_page }}"
+                           class="btn btn-outline-primary btn-sm"
+                           title="Go to page {{ next_page }}"
+                           data-bs-toggle="tooltip" data-bs-placement="right">
+                            Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                        </a>
+                    {% endif %}
+                {% else %}
+                    <span class="btn btn-outline-secondary btn-sm disabled">
+                        <i class="fa fa-angles-right"></i>
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+        {% if debug %}
+            <hr>
+            <pre><strong>api_users</strong>:<br>{{ api_users|pprint }}</pre>
+            <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+            <br>
+        {% endif %}
+    {% endif %}
+{% endblock %}

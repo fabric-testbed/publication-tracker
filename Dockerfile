@@ -1,0 +1,23 @@
+FROM python:3
+MAINTAINER Michael J. Stealey <mjstealey@gmail.com>
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN apt-get update --yes \
+  && apt-get install --yes --no-install-recommends \
+  postgresql-client \
+  && mkdir /code/ \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# specifies nrig-service UID
+RUN useradd -r -u 20049 appuser
+
+WORKDIR /code
+VOLUME ["/code"]
+ENTRYPOINT ["/code/docker-entrypoint.sh"]

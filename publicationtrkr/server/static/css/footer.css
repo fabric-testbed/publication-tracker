@@ -1,0 +1,26 @@
+/* Site footer styling */
+.footer {
+  position: fixed;
+  font-size: 0.9rem;
+  display: flex;
+  bottom: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 3.5rem;
+  width: 100%;
+}
+
+.footer .link {
+  color: #fff;
+  font-weight: 400;
+}
+
+.footer .link:hover {
+  color: #a8c9dc !important;
+}
+
+.footer .sm-font,
+.footer .sm-font a {
+  color: rgba(255, 255, 255, 0.8);
+}

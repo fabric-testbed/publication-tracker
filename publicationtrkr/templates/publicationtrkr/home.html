@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if not api_user.access_expires %}
+        <div class="container w-85 mt-4">
+            <div class="detail-card" style="text-align: center; padding: 3rem 2rem;">
+                <i class="fa fa-right-to-bracket fa-2x mb-3 d-block" style="color: #5798bc;"></i>
+                <h3>Welcome to the FABRIC Publication Tracker</h3>
+                <p class="text-muted mt-2">Please log in to gain full access.</p>
+                <a href="/login" class="btn btn-primary btn-fabric mt-2"
+                   title="Log in with your FABRIC identity"
+                   data-bs-toggle="tooltip" data-bs-placement="bottom">
+                    <i class="fa fa-right-to-bracket me-1"></i> Login
+                </a>
+            </div>
+        </div>
+    {% else %}
+        <div class="container w-85">
+            <div class="page-header">
+                <h2>Publication Tracker</h2>
+                <span class="subtitle">Track publications that utilize FABRIC services</span>
+            </div>
+
+            <div class="detail-card" style="padding: 1.5rem;">
+                <p>
+                    The Publication Tracker is designed to help FABRIC users and operators keep track of publications
+                    that have in some way utilized FABRIC services to do their work.
+                </p>
+                <p class="mb-2">
+                    Publications can be created by pasting a BibTeX entry (which auto-fills the fields below) or by
+                    filling in the fields manually. Manual values override BibTeX-parsed values. The publication fields are:
+                </p>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    <span class="pub-badge"><i class="fa fa-users me-1"></i>authors <em>(required)</em></span>
+                    <span class="pub-badge"><i class="fa fa-heading me-1"></i>title <em>(required)</em></span>
+                    <span class="pub-badge"><i class="fa fa-calendar-days me-1"></i>year <em>(required)</em></span>
+                    <span class="pub-badge"><i class="fa fa-quote-left me-1"></i>bibtex</span>
+                    <span class="pub-badge"><i class="fa fa-link me-1"></i>link</span>
+                    <span class="pub-badge"><i class="fa fa-building-columns me-1"></i>venue</span>
+                    <span class="pub-badge pub-badge-project"><i class="fa fa-diagram-project me-1"></i>project_name</span>
+                    <span class="pub-badge pub-badge-project"><i class="fa fa-fingerprint me-1"></i>project_uuid</span>
+                </div>
+
+                <div class="code-block">
+                    <pre style="margin: 0;"><code>{
+    "authors": ["string"],
+    "bibtex": "string",
+    "link": "string",
+    "venue": "string",
+    "project_name": "string",
+    "project_uuid": "string",
+    "title": "string",
+    "year": "string"
+}</code></pre>
+                </div>
+            </div>
+
+            <div class="page-header mt-4">
+                <h3>
+                    User Information
+                    <small class="subtitle">({{ api_user.name }})</small>
+                </h3>
+            </div>
+
+            <div class="detail-card">
+                <div class="detail-row">
+                    <div class="detail-label">Name</div>
+                    <div class="detail-value"><strong>{{ api_user.name }}</strong></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Affiliation</div>
+                    <div class="detail-value"><strong>{{ api_user.affiliation }}</strong></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Email</div>
+                    <div class="detail-value"><strong>{{ api_user.email }}</strong></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">UUID</div>
+                    <div class="detail-value"><code>{{ api_user.uuid }}</code></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">CILogon ID</div>
+                    <div class="detail-value"><code>{{ api_user.cilogon_id }}</code></div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">FABRIC Roles</div>
+                    <div class="detail-value">
+                        {% for r in api_user.fabric_roles %}
+                            <span class="pub-badge mb-1">{{ r }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Projects (UUIDs)</div>
+                    <div class="detail-value">
+                        {% for p in api_user.projects %}
+                            <code class="d-block mb-1">{{ p }}</code>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3 mb-4">
+                <small class="text-muted">
+                    <i class="fa fa-circle-info me-1"></i>
+                    <b>DISCLAIMER</b>: The code herein may not be up to date nor compliant with the most recent package
+                    and/or security notices. The frequency at which this code is reviewed and updated is based solely on the
+                    lifecycle of the project for which it was written to support, and is not actively maintained outside of
+                    that scope. Use at your own risk.
+                </small>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

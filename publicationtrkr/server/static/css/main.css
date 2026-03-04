@@ -1,0 +1,625 @@
+/* FABRIC Publication Tracker — main styling */
+
+/* Typography */
+body {
+  font-family: 'Roboto', sans-serif;
+  position: relative;
+  min-height: 100%;
+  padding-bottom: 8em;
+  margin: 0;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Montserrat', sans-serif;
+}
+
+html {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+main {
+  margin: 2rem;
+  bottom: 5rem;
+}
+
+/* Form validation errors */
+ul.errorlist {
+  margin: 0;
+  padding: 0;
+}
+
+.errorlist li {
+  border: 1px solid #b00020;
+  color: #b00020;
+  background: rgba(176, 0, 32, 0.1);
+  list-style-position: inside;
+  display: block;
+  font-size: 1.2em;
+  margin: 0 0 3px;
+  padding: 4px 5px;
+  text-align: center;
+  border-radius: 3px;
+}
+
+.errorlist {
+  display: none;
+}
+
+input:not([type="submit"], [type="checkbox"]),
+textarea,
+select {
+  width: 100%;
+  padding: 5px !important;
+  -webkit-box-sizing: border-box;
+  -moz-box-sizing: border-box;
+  box-sizing: border-box;
+}
+
+.success {
+  background-color: rgba(0, 142, 122, 0.15);
+  padding: 10px;
+  text-align: center;
+  color: #008e7a;
+  border: 1px solid #008e7a;
+  border-radius: 3px;
+}
+
+/* Layout */
+.profile-body {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.message-body {
+  margin-top: 1rem;
+}
+
+.profile-body .active {
+  background-color: #fff;
+}
+
+.list-group-item.active {
+  background-color: #5798bc;
+  border: none;
+}
+
+#profile-list-tab {
+  margin-top: 5.5rem;
+}
+
+h4[aria-expanded="true"] .fa-plus {
+  display: none;
+}
+
+h4[aria-expanded="false"] .fa-minus {
+  display: none;
+}
+
+/* Preferences form */
+.preference-form p {
+  margin: 0.8rem 0;
+}
+
+.preference-form p label {
+  font-size: 1.25rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.preference-form ul {
+  list-style-type: none;
+  display: inline;
+}
+
+.preference-form ul li {
+  display: inline;
+}
+
+.preference-form ul li label {
+  padding-right: 1rem;
+}
+
+#id_role,
+#id_show_uuid {
+  padding-left: 0;
+}
+
+/* Tooltips */
+.tooltip-inner {
+  max-width: 25rem;
+  text-align: left;
+  border-radius: 0.25rem;
+}
+
+/* Buttons and messages */
+.message-btn {
+  padding: 0.35rem 1rem;
+  margin-right: 0.5rem;
+}
+
+.unlink {
+  color: #fff !important;
+  text-decoration: none;
+}
+
+.unlink:hover,
+.unlink:focus {
+  color: #fff !important;
+  text-decoration: none;
+}
+
+.courier-font-link {
+  font-family: Courier;
+}
+
+/* Links — FABRIC primary color */
+.card-header a {
+  color: #5798bc;
+}
+
+a {
+  color: #5798bc;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #1f6a8c !important;
+}
+
+.btn:hover {
+  color: #fff !important;
+}
+
+/* Callouts */
+.bd-callout {
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid #e9ecef;
+  border-left-width: 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.bd-callout-info {
+  border-left-color: #5798bc;
+}
+
+/* Button colors — FABRIC palette */
+.btn-primary {
+  background-color: #5798bc !important;
+  border-color: #5798bc !important;
+}
+
+.btn-outline-primary:hover {
+  background-color: #5798bc !important;
+  color: #fff !important;
+}
+
+.btn-outline-primary {
+  border-color: #5798bc !important;
+  color: #5798bc !important;
+}
+
+.btn-check:checked+.btn, .btn.active, .btn.show, .btn:first-child:active, :not(.btn-check)+.btn:active {
+  background-color: #5798bc !important;
+}
+
+.btn-secondary {
+  background-color: #838385 !important;
+  border-color: #838385 !important;
+}
+
+.btn-success {
+  background-color: #008e7a !important;
+  border-color: #008e7a !important;
+}
+
+.btn-outline-success {
+  border-color: #008e7a !important;
+  color: #008e7a !important;
+}
+
+.btn-outline-success:hover {
+  background-color: #008e7a !important;
+  color: #fff !important;
+}
+
+.btn-danger {
+  background-color: #b00020 !important;
+  border-color: #b00020 !important;
+}
+
+.btn-outline-danger {
+  border-color: #b00020 !important;
+  color: #b00020 !important;
+}
+
+.btn-outline-danger:hover {
+  background-color: #b00020 !important;
+  color: #fff !important;
+}
+
+.btn-warning {
+  background-color: #ff8542 !important;
+  border-color: #ff8542 !important;
+  color: #fff !important;
+}
+
+.btn-info {
+  background-color: #a8c9dc !important;
+  border-color: #a8c9dc !important;
+  color: #fff !important;
+}
+
+.text-info {
+  color: #a8c9dc !important;
+}
+
+/* Alerts */
+.alert {
+  width: 100%;
+}
+
+/* Navbar */
+.navbar {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  --bs-navbar-padding-y: 0 !important;
+}
+
+.navbar .navbar-brand {
+  color: #fff !important;
+}
+
+.navbar .nav-link {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.navbar .nav-link:hover,
+.navbar .nav-link:focus {
+  color: #fff !important;
+}
+
+/* Utilities */
+.sm-font {
+  font-size: 0.8rem;
+}
+
+.badge-primary {
+  background-color: #5798bc !important;
+}
+
+/* ===== Shared component styles ===== */
+
+/* Page headers */
+.page-header {
+  margin-bottom: 1.25rem;
+}
+
+.page-header h2,
+.page-header h3 {
+  margin-bottom: 0.25rem;
+}
+
+.page-header .subtitle {
+  font-size: 0.9rem;
+  color: #838385;
+}
+
+/* Search bar */
+.search-bar {
+  border-radius: 0.5rem;
+  border: 1px solid #d1d9e0;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-bar:focus {
+  border-color: #5798bc;
+  box-shadow: 0 0 0 3px rgba(87, 152, 188, 0.15);
+  outline: none;
+}
+
+/* Fabric-branded buttons */
+.btn-fabric {
+  border-radius: 0.5rem;
+  font-weight: 500;
+  padding: 0.5rem 1.25rem;
+  transition: all 0.2s ease;
+}
+
+/* Publication cards (list views) */
+.pub-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1rem;
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.pub-card:hover {
+  box-shadow: 0 4px 16px rgba(55, 73, 85, 0.1);
+  transform: translateY(-1px);
+}
+
+.pub-title a {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #374955;
+  text-decoration: none;
+}
+
+.pub-title a:hover {
+  color: #5798bc !important;
+}
+
+.pub-source-link {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: #5798bc;
+}
+
+.pub-meta {
+  font-size: 0.92rem;
+  color: #555;
+  margin-top: 0.4rem;
+  line-height: 1.6;
+}
+
+.pub-meta-label {
+  font-weight: 500;
+  color: #374955;
+}
+
+.pub-authors a {
+  color: #5798bc;
+  text-decoration: none;
+}
+
+.pub-authors a:hover {
+  text-decoration: underline;
+}
+
+.pub-badge {
+  display: inline-block;
+  background: #eef5fa;
+  color: #1f6a8c;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  margin-right: 0.35rem;
+}
+
+.pub-badge a {
+  color: inherit !important;
+  text-decoration: none;
+}
+
+.pub-badge-project {
+  background: #e8f5f2;
+  color: #008e7a;
+}
+
+/* Pagination bar */
+.pagination-bar {
+  background: #f8f9fa;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  margin-top: 0.5rem;
+}
+
+.pagination-bar .btn {
+  border-radius: 0.5rem;
+}
+
+.results-count {
+  font-size: 0.9rem;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+/* Detail cards (replacing striped tables on detail pages) */
+.detail-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.detail-row {
+  display: flex;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid #f0f2f5;
+  align-items: baseline;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-row:hover {
+  background: #f8fafb;
+}
+
+.detail-label {
+  flex: 0 0 160px;
+  font-weight: 500;
+  color: #374955;
+  font-size: 0.9rem;
+}
+
+.detail-value {
+  flex: 1;
+  color: #555;
+}
+
+/* Form cards */
+.form-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-card p {
+  margin-bottom: 1rem;
+}
+
+.form-card label {
+  font-weight: 500;
+  color: #374955;
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.form-card input,
+.form-card textarea,
+.form-card select {
+  border-radius: 0.4rem;
+  border: 1px solid #d1d9e0;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-card input:focus,
+.form-card textarea:focus,
+.form-card select:focus {
+  border-color: #5798bc;
+  box-shadow: 0 0 0 3px rgba(87, 152, 188, 0.15);
+}
+
+.form-card hr {
+  border-color: #e2e8f0;
+  margin: 1.25rem 0;
+}
+
+.form-divider {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.25rem 0;
+}
+
+label.required::after {
+  content: ' * required';
+  color: #b00020;
+  font-size: small;
+  font-weight: 400;
+}
+
+/* Soft table (for tabular data like author list, project list, api users) */
+.soft-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.soft-table thead th {
+  background: #f5f8fa;
+  color: #374955;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.soft-table tbody td {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid #f0f2f5;
+  color: #555;
+  font-size: 0.92rem;
+}
+
+.soft-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.soft-table tbody tr:hover {
+  background: #f8fafb;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #838385;
+}
+
+.empty-state i {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+/* Action button row */
+.action-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Alert with soft corners */
+.alert {
+  border-radius: 0.5rem;
+}
+
+/* Copy-to-clipboard button */
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  margin-left: 0.4rem;
+  border: 1px solid #d1d9e0;
+  border-radius: 0.35rem;
+  background: #f5f8fa;
+  color: #838385;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+  vertical-align: middle;
+}
+
+.btn-copy:hover {
+  background: #5798bc !important;
+  border-color: #5798bc;
+  color: #fff !important;
+}
+
+.btn-copy.copied {
+  background: #008e7a !important;
+  border-color: #008e7a;
+  color: #fff !important;
+}
+
+/* Smaller variant for table rows */
+.btn-copy-sm {
+  width: 1.35rem;
+  height: 1.35rem;
+  font-size: 0.65rem;
+}
+
+/* Code block styling for home page */
+.code-block {
+  background: #374955;
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  overflow-x: auto;
+}
+
+.code-block code {
+  color: #e8e8e8;
+  font-size: 0.9rem;
+}

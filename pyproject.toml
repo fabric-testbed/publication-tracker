@@ -1,0 +1,21 @@
+[project]
+name = "publication-tracker"
+version = "0.1.0"
+requires-python = ">= 3.12"
+dependencies = [
+    "bibtexparser",
+    "cryptography",
+    "Django",
+    "django-bootstrap5",
+    "django-cors-headers",
+    "django-filter",
+    "djangorestframework",
+    "drf-spectacular",
+    "fontawesomefree",
+    "markdown",
+    "psycopg2-binary",
+    "pyjwt",
+    "python-dateutil",
+    "requests",
+    "uwsgi",
+]
