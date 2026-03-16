@@ -40,10 +40,11 @@ Users authenticate via FABRIC's federated identity (CILogon / OAuth2). Role-base
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
-| `pubtrkr-django` | Custom (Python 3 + uWSGI) | 8000 (internal) | Django application |
-| `pubtrkr-database` | `postgres:15` | 5432 (internal) | PostgreSQL database |
-| `pubtrkr-nginx` | `nginx` | 8080 (HTTP), 8443 (HTTPS) | Reverse proxy + SSL termination |
-| `pubtrkr-vouch` | `voucher/vouch-proxy:v0.27.1` | 9090 (internal) | OAuth2/OIDC authentication |
+| `pubtrkr-database` | `postgres:18` | 5432 | PostgreSQL database |
+| `pubtrkr-nginx` | `nginx:1` | 8080 (HTTP), 8443 (HTTPS) | Reverse proxy + SSL termination |
+| `pubtrkr-vouch-proxy` | `fabrictestbed/vouch-proxy:0.27.1` | 9090 (internal) | OAuth2/OIDC authentication |
+
+The Django application runs outside of Docker (via `run_server.sh`) for local development, or can be containerized using the provided `Dockerfile` for production. Alternate compose files in `compose/` provide configurations for local-ssl and production-ssl deployments.
 
 All services communicate on a private bridge network (`pubtrkr-network`).
 
@@ -84,7 +85,7 @@ Two auth modes are supported:
 
 - Python >= 3.12
 - Docker and Docker Compose (for production deployment)
-- PostgreSQL 15 (provided by Docker in production; external for local dev)
+- PostgreSQL 18 (provided by Docker in production; external for local dev)
 - CILogon client credentials (for OAuth2/OIDC)
 
 ### Python Dependencies
@@ -129,15 +130,21 @@ cp env.template .env
 | `API_USER_REFRESH_CHECK_MINUTES` | `5` | How often to re-fetch user details from FABRIC Core API (minutes) |
 | `AUTHOR_REFRESH_CHECK_DAYS` | `1` | How often to refresh author data (days) |
 | `API_USER_ANON_UUID` | `00000000-0000-0000-0000-000000000000` | UUID for the anonymous (unauthenticated) user |
-| `API_USER_ANON_NAME` | `Anonymous` | Display name for anonymous user |
+| `API_USER_ANON_NAME` | `Anonymous API User` | Display name for anonymous user |
 
 #### Task Timeout Tracker (API result caching)
 
 | Variable | Default | Description |
 |---|---|---|
-| `TASK_TIMEOUT_ARC` | `86400` | Author Refresh Check timeout (seconds) |
-| `TASK_TIMEOUT_PSK` | `86400` | Public Signing Key cache timeout (seconds) |
-| `TASK_TIMEOUT_TRL` | `300` | Token Revocation List cache timeout (seconds) |
+| `ARC_NAME` | `author_refresh_check` | Author Refresh Check task name |
+| `ARC_DESCRIPTION` | `Author Refresh Check` | Author Refresh Check description |
+| `ARC_TIMEOUT_IN_SECONDS` | `86400` | Author Refresh Check timeout (seconds) |
+| `PSK_NAME` | `public_signing_key` | Public Signing Key task name |
+| `PSK_DESCRIPTION` | `Public Signing Key` | Public Signing Key description |
+| `PSK_TIMEOUT_IN_SECONDS` | `86400` | Public Signing Key cache timeout (seconds) |
+| `TRL_NAME` | `token_revocation_list` | Token Revocation List task name |
+| `TRL_DESCRIPTION` | `Token Revocation List` | Token Revocation List description |
+| `TRL_TIMEOUT_IN_SECONDS` | `300` | Token Revocation List cache timeout (seconds) |
 
 #### FABRIC Services
 
@@ -158,6 +165,7 @@ cp env.template .env
 
 | Variable | Example | Description |
 |---|---|---|
+| `PYTHONPATH` | `./:./venv:./.venv` | Python module search path |
 | `DJANGO_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated allowed hostnames |
 | `DJANGO_SECRET_KEY` | `<random string>` | Django secret key |
 | `DJANGO_DEBUG` | `false` | Django debug mode |
@@ -170,18 +178,28 @@ cp env.template .env
 
 | Variable | Default | Description |
 |---|---|---|
-| `POSTGRES_PASSWORD` | `default123!` | Database password |
+| `POSTGRES_PASSWORD` | `<secret>` | Database password |
 | `POSTGRES_USER` | `postgres` | Database user |
 | `POSTGRES_DB` | `postgres` | Database name |
 | `POSTGRES_HOST` | `database` | Database host (use `database` in Docker) |
 | `POSTGRES_PORT` | `5432` | Database port |
+| `HOST_DB_DATA` | `./db_data` | Host path for persistent database data |
+| `PGDATA` | `/var/lib/postgresql/data` | Container path for PostgreSQL data |
+
+#### Nginx
+
+| Variable | Default | Description |
+|---|---|---|
+| `NGINX_DEFAULT_CONF` | `./nginx/default.conf` | Path to Nginx virtual server config |
+| `NGINX_NGINX_CONF` | `./nginx/nginx.conf` | Path to Nginx main config |
+| `NGINX_SSL_CERTS_DIR` | `./ssl` | Path to SSL certificates directory |
 
 #### uWSGI
 
 | Variable | Default | Description |
 |---|---|---|
-| `UWSGI_UID` | `503` | uWSGI process UID |
-| `UWSGI_GID` | `1000` | uWSGI process GID |
+| `UWSGI_UID` | `<user_uid>` | uWSGI process UID |
+| `UWSGI_GID` | `<user_gid>` | uWSGI process GID |
 
 ### Vouch Proxy Configuration
 
@@ -214,7 +232,7 @@ oauth:
 
 ### SSL Certificates
 
-TODO: Generation of development self-signed certificates is described in the `ssl/` directory (never use in production). For production, replace with valid certificates mounted to the Nginx container at:
+TODO: Generation of development self-signed certificates is described in `ssl/` (never use in production). For production, replace with valid certificates mounted to the Nginx container at:
 
 - `/etc/ssl/fullchain.pem`
 - `/etc/ssl/privkey.pem`
@@ -544,8 +562,11 @@ curl -H "Authorization: Bearer <fabric_token>" https://<host>:8443/api/publicati
 publication-tracker/
 ├── .env                          # Active configuration (not in git)
 ├── env.template                  # Configuration template
-├── docker-compose.yml            # Four-service Docker composition
-├── Dockerfile                    # Django container image
+├── docker-compose.yml            # Docker composition (database, nginx, vouch)
+├── compose/
+│   ├── docker-compose.yml.local-ssl   # Alternate compose for local SSL
+│   └── docker-compose.yml.prod-ssl    # Alternate compose for production SSL
+├── Dockerfile                    # Django container image (python:3 + uv)
 ├── docker-entrypoint.sh          # Container startup script
 ├── run_server.sh                 # Server launcher (local-dev / local-ssl / docker)
 ├── pyproject.toml                # Python dependencies (requires 3.12+)
@@ -556,7 +577,7 @@ publication-tracker/
 ├── ssl/                          # Development self-signed certificates
 ├── vouch/
 │   ├── config.template           # Vouch Proxy config template
-│   └── config                    # Active Vouch config
+│   └── config                    # Active Vouch config (not in git)
 └── publicationtrkr/              # Django project root
     ├── manage.py
     ├── server/
@@ -567,6 +588,7 @@ publication-tracker/
     │   ├── apiuser/              # FABRIC identity & role management
     │   │   ├── models.py         # ApiUser, TaskTimeoutTracker
     │   │   ├── views.py          # apiuser_list, apiuser_detail
+    │   │   ├── tests.py
     │   │   ├── urls.py
     │   │   └── management/commands/
     │   │       ├── init_anon_api_user.py
@@ -574,11 +596,13 @@ publication-tracker/
     │   ├── publications/         # Full publication tracking (BibTeX)
     │   │   ├── models.py         # Publication, Author
     │   │   ├── views.py          # publication_*, author_*
+    │   │   ├── tests.py
     │   │   ├── urls.py
     │   │   ├── forms.py          # PublicationForm, AuthorForm
     │   │   ├── api/
     │   │   │   ├── viewsets.py   # PublicationViewSet, AuthorViewSet
-    │   │   │   └── serializers.py
+    │   │   │   ├── serializers.py
+    │   │   │   └── validators.py
     │   │   ├── templatetags/
     │   │   │   └── publications_tags.py
     │   │   └── management/commands/
@@ -586,10 +610,13 @@ publication-tracker/
     │   └── pubsimple/            # Simple publication entries
     │       ├── models.py         # PubSimple
     │       ├── views.py
+    │       ├── tests.py
     │       ├── urls.py
+    │       ├── fixtures/         # apiuser.json, pubsimple.json
     │       └── api/
     │           ├── viewsets.py   # PubSimpleViewSet
-    │           └── serializers.py
+    │           ├── serializers.py
+    │           └── validators.py
     ├── utils/
     │   ├── fabric_auth.py        # Cookie & bearer token authentication
     │   ├── core_api.py           # FABRIC Core API wrappers
