@@ -48,6 +48,12 @@ def author_list(request):
 
 def publication_list(request):
     api_user = get_api_user(request=request)
+    sort_by = request.GET.get('sort_by', 'year')
+    order_by = request.GET.get('order_by', 'desc')
+    if sort_by not in ('title', 'year'):
+        sort_by = 'year'
+    if order_by not in ('asc', 'desc'):
+        order_by = 'desc'
     try:
         publications = list_object_paginator(request=request, object_type=ListObjectType.PUBLICATIONS)
         message = publications.get('message', None)
@@ -64,6 +70,8 @@ def publication_list(request):
                       'next_page': publications.get('next_page', None),
                       'prev_page': publications.get('prev_page', None),
                       'search': publications.get('search', None),
+                      'sort_by': sort_by,
+                      'order_by': order_by,
                       'count': publications.get('count', None),
                       'debug': API_DEBUG
                   })
@@ -281,6 +289,10 @@ def list_object_paginator(request, object_type: str, *args, **kwargs):
         if request.GET.get('search'):
             data_dict['search'] = request.GET.get('search')
             search_term = request.GET.get('search')
+        if request.GET.get('sort_by'):
+            data_dict['sort_by'] = request.GET.get('sort_by')
+        if request.GET.get('order_by'):
+            data_dict['order_by'] = request.GET.get('order_by')
         if request.GET.get('page'):
             data_dict['page'] = request.GET.get('page')
             current_page = int(request.GET.get('page'))

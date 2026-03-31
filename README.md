@@ -331,7 +331,7 @@ All pages are accessible at `https://<host>:8443/`.
 | URL | Access | Description |
 |---|---|---|
 | `/` | All | Landing page |
-| `/publications/` | All | Browse all publications; authors with FABRIC accounts are linked |
+| `/publications/` | All | Browse all publications with sorting (by year or title) and search |
 | `/publications/create/` | Creators, Admins | Create a new publication (BibTeX or manual) |
 | `/publications/<uuid>` | All | Publication detail with edit/delete for owners and admins |
 | `/publications/<uuid>/update` | Owner, Admins | Edit publication fields |
@@ -414,11 +414,15 @@ Unauthenticated requests are allowed for read operations (GET).
 
 | Parameter | Endpoints | Description |
 |---|---|---|
-| `?search=<term>` | `GET /api/publications` | Filter by title or project name |
+| `?search=<term>` | `GET /api/publications` | Filter by title or project name (case-insensitive) |
+| `?sort_by=<field>` | `GET /api/publications` | Sort field: `title` or `year` (default: `year`) |
+| `?order_by=<dir>` | `GET /api/publications` | Sort direction: `asc` or `desc` (default: `desc`) |
 | `?page=<n>` | All list endpoints | Pagination |
 | `?fabric_uuid=<uuid>` | `by-author-uuid` | Required; must be a valid UUID v4 |
 | `?project_uuid=<uuid>` | `by-project-uuid` | Required; must be a valid UUID v4 |
 | `?search=<term>` | `by-project-uuid` | Optional; filter by title or project name (3+ chars) |
+
+When `sort_by=year`, a secondary sort by title (ascending) is applied within each year.
 
 **Examples:**
 
@@ -428,6 +432,12 @@ curl "https://<host>:8443/api/publications?page=2"
 
 # Search publications
 curl "https://<host>:8443/api/publications?search=FABRIC+network"
+
+# Sort by year descending (default)
+curl "https://<host>:8443/api/publications?sort_by=year&order_by=desc"
+
+# Sort by title ascending
+curl "https://<host>:8443/api/publications?sort_by=title&order_by=asc"
 
 # Get a specific publication
 curl "https://<host>:8443/api/publications/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"

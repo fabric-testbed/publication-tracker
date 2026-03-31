@@ -40,6 +40,18 @@
                     {% endif %}
                 </div>
             </div>
+            <div class="d-flex flex-row align-items-center gap-2 mb-3">
+                <label for="sort_by" class="form-label mb-0 text-nowrap"><i class="fa fa-sort me-1"></i> Sort by</label>
+                <select id="sort_by" name="sort_by" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+                    <option value="year" {% if sort_by == 'year' %}selected{% endif %}>Year</option>
+                    <option value="title" {% if sort_by == 'title' %}selected{% endif %}>Title</option>
+                </select>
+                <label for="order_by" class="form-label mb-0 text-nowrap ms-2"><i class="fa fa-arrow-down-wide-short me-1"></i> Order</label>
+                <select id="order_by" name="order_by" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+                    <option value="desc" {% if order_by == 'desc' %}selected{% endif %}>Descending</option>
+                    <option value="asc" {% if order_by == 'asc' %}selected{% endif %}>Ascending</option>
+                </select>
+            </div>
         </form>
 
         <div class="pub-list">
@@ -114,14 +126,14 @@
         <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
             {% if prev_page %}
                 {% if search %}
-                    <a href="{{ publications.previous }}&search={{ search }}"
+                    <a href="{{ publications.previous }}&search={{ search }}&sort_by={{ sort_by }}&order_by={{ order_by }}"
                        class="btn btn-outline-primary btn-sm"
                        title="Go to page {{ prev_page }}"
                        data-bs-toggle="tooltip" data-bs-placement="left">
                         <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
                     </a>
                 {% else %}
-                    <a href="{{ publications.previous }}"
+                    <a href="{{ publications.previous }}&sort_by={{ sort_by }}&order_by={{ order_by }}"
                        class="btn btn-outline-primary btn-sm"
                        title="Go to page {{ prev_page }}"
                        data-bs-toggle="tooltip" data-bs-placement="left">
@@ -138,14 +150,14 @@
 
             {% if next_page %}
                 {% if search %}
-                    <a href="{{ publications.next }}&search={{ search }}"
+                    <a href="{{ publications.next }}&search={{ search }}&sort_by={{ sort_by }}&order_by={{ order_by }}"
                        class="btn btn-outline-primary btn-sm"
                        title="Go to page {{ next_page }}"
                        data-bs-toggle="tooltip" data-bs-placement="right">
                         Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
                     </a>
                 {% else %}
-                    <a href="{{ publications.next }}"
+                    <a href="{{ publications.next }}&sort_by={{ sort_by }}&order_by={{ order_by }}"
                        class="btn btn-outline-primary btn-sm"
                        title="Go to page {{ next_page }}"
                        data-bs-toggle="tooltip" data-bs-placement="right">

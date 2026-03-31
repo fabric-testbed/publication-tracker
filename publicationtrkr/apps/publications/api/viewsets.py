@@ -69,10 +69,42 @@ class PublicationViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         return self.serializer_classes.get(self.action, self.default_serializer_class)
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='sort_by',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=['title', 'year'],
+                description='Field to sort results by. Defaults to "year".',
+            ),
+            OpenApiParameter(
+                name='order_by',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=['asc', 'desc'],
+                description='Sort direction. Defaults to "desc".',
+            ),
+        ],
+    )
     def list(self, request, *args, **kwargs):
         """
         list (GET)
         """
+        sort_by = request.query_params.get('sort_by', 'year').lower()
+        order_by = request.query_params.get('order_by', 'desc').lower()
+        if sort_by not in ('title', 'year'):
+            sort_by = 'year'
+        if order_by not in ('asc', 'desc'):
+            order_by = 'desc'
+        prefix = '-' if order_by == 'desc' else ''
+        if sort_by == 'year':
+            # secondary sort: title asc within each year
+            self.queryset = Publication.objects.all().order_by(f'{prefix}year', 'title')
+        else:
+            self.queryset = Publication.objects.all().order_by(f'{prefix}title')
         return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
