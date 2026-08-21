@@ -126,7 +126,8 @@ git clone --quiet "$PUBLIC_REPO_URL" "$PUBLIC"
 # 4. Wipe public repo content (except .git) and copy staged files in.
 echo "--- Syncing staged files into public repo ---"
 find "$PUBLIC" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-cp -r "$STAGING"/* "$PUBLIC"/
+# `"$STAGING"/.` (NOT `/*`) — the glob does not match dotfiles.
+cp -r "$STAGING"/. "$PUBLIC"/
 
 echo
 echo "=== Public repo contents ==="
@@ -134,7 +135,8 @@ find "$PUBLIC" -mindepth 1 -not -path "$PUBLIC/.git/*" -not -name '.git' | sort
 
 # 5. Commit + tag.
 cd "$PUBLIC"
-git add -A
+# -f so the published .gitignore cannot suppress manifest-selected files.
+git add -A -f
 if git diff --cached --quiet; then
   echo
   echo "No changes to publish. Nothing to do."

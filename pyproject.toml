@@ -1,11 +1,11 @@
 [project]
 name = "publication-tracker"
-version = "1.9.7"
+version = "1.9.8"
 requires-python = ">= 3.12"
 dependencies = [
     "bibtexparser",
     "cryptography",
-    "Django",
+    "Django~=6.0",
     "django-bootstrap5",
     "django-cors-headers",
     "django-filter",
