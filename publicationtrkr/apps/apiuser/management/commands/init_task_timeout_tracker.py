@@ -6,6 +6,13 @@ from django.core.management.base import BaseCommand, CommandError
 
 from publicationtrkr.apps.apiuser.models import TaskTimeoutTracker
 
+# (name, description, timeout) environment keys for each tracked task
+TRACKERS = (
+    ('ARC_NAME', 'ARC_DESCRIPTION', 'ARC_TIMEOUT_IN_SECONDS'),
+    ('PSK_NAME', 'PSK_DESCRIPTION', 'PSK_TIMEOUT_IN_SECONDS'),
+    ('TRL_NAME', 'TRL_DESCRIPTION', 'TRL_TIMEOUT_IN_SECONDS'),
+)
+
 
 def init_task_timeout_tracker():
     """
@@ -13,57 +20,32 @@ def init_task_timeout_tracker():
     - author_refresh_check
     - public_signing_key
     - token_revocation_list
+
+    Keyed on name via update_or_create so re-running against a database that
+    already holds these rows updates them in place. The previous
+    .filter(name=...).first() pattern inserted a second row whenever the lookup
+    missed, and the duplicates it left behind broke the objects.get(name=...)
+    calls in utils/fabric_auth.py.
     """
     try:
         now = datetime.now(timezone.utc)
-        # author_refresh_check
-        arc = TaskTimeoutTracker.objects.filter(name=os.getenv('ARC_NAME')).first()
-        if not arc:
-            arc = TaskTimeoutTracker(
-                description=os.getenv('ARC_DESCRIPTION'),
-                last_updated=(now - timedelta(seconds=(int(os.getenv('ARC_TIMEOUT_IN_SECONDS')) + 1))),
-                name=os.getenv('ARC_NAME'),
-                timeout_in_seconds=int(os.getenv('ARC_TIMEOUT_IN_SECONDS')),
-                uuid=str(uuid4()),
-                value=None
+        for name_key, description_key, timeout_key in TRACKERS:
+            timeout_in_seconds = int(os.getenv(timeout_key))
+            shared = {
+                'description': os.getenv(description_key),
+                'timeout_in_seconds': timeout_in_seconds,
+            }
+            TaskTimeoutTracker.objects.update_or_create(
+                name=os.getenv(name_key),
+                defaults=shared,
+                create_defaults={
+                    **shared,
+                    # start out timed out so the first caller populates the value
+                    'last_updated': now - timedelta(seconds=timeout_in_seconds + 1),
+                    'uuid': str(uuid4()),
+                    'value': None,
+                },
             )
-        else:
-            arc.description = os.getenv('ARC_DESCRIPTION')
-            arc.name = os.getenv('ARC_NAME')
-            arc.timeout_in_seconds = os.getenv('ARC_TIMEOUT_IN_SECONDS')
-        arc.save()
-        # public_signing_key
-        psk = TaskTimeoutTracker.objects.filter(name=os.getenv('PSK_NAME')).first()
-        if not psk:
-            psk = TaskTimeoutTracker(
-                description=os.getenv('PSK_DESCRIPTION'),
-                last_updated=(now - timedelta(seconds=(int(os.getenv('PSK_TIMEOUT_IN_SECONDS')) + 1))),
-                name=os.getenv('PSK_NAME'),
-                timeout_in_seconds=int(os.getenv('PSK_TIMEOUT_IN_SECONDS')),
-                uuid=str(uuid4()),
-                value=None
-            )
-        else:
-            psk.description = os.getenv('PSK_DESCRIPTION')
-            psk.name = os.getenv('PSK_NAME')
-            psk.timeout_in_seconds = os.getenv('PSK_TIMEOUT_IN_SECONDS')
-        psk.save()
-        # token_revocation_list
-        trl = TaskTimeoutTracker.objects.filter(name=os.getenv('TRL_NAME')).first()
-        if not trl:
-            trl = TaskTimeoutTracker(
-                description=os.getenv('TRL_DESCRIPTION'),
-                last_updated=(now - timedelta(seconds=(int(os.getenv('TRL_TIMEOUT_IN_SECONDS')) + 1))),
-                name=os.getenv('TRL_NAME'),
-                timeout_in_seconds=int(os.getenv('TRL_TIMEOUT_IN_SECONDS')),
-                uuid=str(uuid4()),
-                value=None
-            )
-        else:
-            trl.description = os.getenv('TRL_DESCRIPTION')
-            trl.name = os.getenv('TRL_NAME')
-            trl.timeout_in_seconds = os.getenv('TRL_TIMEOUT_IN_SECONDS')
-        trl.save()
     except Exception as exc:
         print(exc)
 

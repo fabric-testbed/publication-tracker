@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from django.db.models import UniqueConstraint
 
 
 # Create your models here.
@@ -84,6 +85,9 @@ class TaskTimeoutTracker(models.Model):
 
     # Order by name
     class Meta:
+        constraints = [
+            UniqueConstraint(fields=['name'], name='unique_task_timeout_tracker_name'),
+        ]
         db_table = "task_timeout_tracker"
         ordering = ("name",)
 
