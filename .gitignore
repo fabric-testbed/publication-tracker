@@ -1,5 +1,14 @@
 ### Customization
 
+# deployment-specific overrides -- keep host config out of tracked files
+/docker-compose.override.yml
+/nginx/default.prod.conf
+
+# per-developer agent tool config (see AGENTS.md -> How to connect).
+# .claude/commands/ is shared and stays tracked; only local settings are ignored.
+/.codex/
+/.claude/settings.local.json
+
 # local self-signed ssl certs
 /ssl/*.pem
 
@@ -20,13 +29,9 @@
 /dumpdata/*.json
 /publicationtrkr/apps/pubsimple/fixtures/*.json
 
-# migrations files - only keep __init__.py
-!/publicationtrkr/apps/apiuser/migrations/__init__.py
-!/publicationtrkr/apps/publications/migrations/__init__.py
-!/publicationtrkr/apps/pubsimple/migrations/__init__.py
-/publicationtrkr/apps/apiuser/migrations/
-/publicationtrkr/apps/publications/migrations/
-/publicationtrkr/apps/pubsimple/migrations/
+# migration files are tracked deliberately -- see AGENTS.md / run_server.sh.
+# They used to be ignored and regenerated at container start, which meant the
+# migration that ran against production did not exist until it ran.
 
 ### PyCharm template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider

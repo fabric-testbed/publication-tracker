@@ -1,0 +1,15 @@
+# Example deployment-specific compose overrides.
+#
+# Copy to docker-compose.override.yml (gitignored). Compose merges it
+# automatically -- no -f flag needed. Use it for anything genuinely local to one
+# host, so that docker-compose.yml itself never needs editing in a deployment.
+#
+# Ports and the database volume are NOT here: they are env-driven in
+# docker-compose.yml via NGINX_HTTP_PORT, NGINX_HTTPS_PORT and HOST_DB_DATA.
+
+services:
+
+  nginx:
+    volumes:
+      # Ship nginx logs to the host's log tree.
+      - /opt/data/production/logs/nginx/publications:/var/log/nginx

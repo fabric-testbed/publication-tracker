@@ -14,7 +14,9 @@ A Django web application for tracking research publications that utilize [FABRIC
 - [Configuration](#configuration)
 - [Running the Application](#running-the-application)
   - [Docker (Production)](#docker-production)
+  - [Deployment-Specific Configuration](#deployment-specific-configuration)
   - [Local Development](#local-development)
+  - [Database Migrations](#database-migrations)
 - [Initial Setup](#initial-setup)
 - [Web Interface](#web-interface)
 - [REST API](#rest-api)
@@ -261,6 +263,33 @@ The application is available at:
 - `http://localhost:8080` (redirects to HTTPS)
 - `https://localhost:8443`
 
+### Deployment-Specific Configuration
+
+A deployment should never need to edit a tracked file. Everything that differs
+between hosts is environment-driven:
+
+| What differs | How to set it |
+|---|---|
+| Public hostname | `DJANGO_ALLOWED_HOSTS` (comma-separated, added to the localhost defaults) |
+| Browser origins allowed to call the API | `DJANGO_CORS_ALLOWED_ORIGINS` (comma-separated) |
+| Published http/https ports | `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT` (default 8080/8443) |
+| PostgreSQL data directory on the host | `HOST_DB_DATA` |
+| nginx server config | `NGINX_DEFAULT_CONF` -- point it at a copy, e.g. `./nginx/default.prod.conf` |
+| TLS certificate directory | `NGINX_SSL_CERTS_DIR` |
+
+For anything that genuinely cannot be expressed as a variable -- an extra bind
+mount, say -- copy `docker-compose.override.yml.example` to
+`docker-compose.override.yml`. Compose merges it automatically, with no `-f` flag.
+Both that file and `nginx/default.prod.conf` are gitignored.
+
+`nginx/default.conf.prod-example` shows how the shipped nginx config differs from a
+production one: no `:8443` suffix (nginx publishes 80/443 directly) and real
+certificate filenames.
+
+Keeping the checkout clean this way means upgrading is `git fetch --tags && git
+checkout <tag>` -- no stashing local edits across the switch, and no silent
+auto-merge into a file the deployment had modified.
+
 ### Local Development
 
 All commands run from `publication-tracker/publicationtrkr/`.
@@ -285,14 +314,38 @@ cd publicationtrkr
 # With SSL (uWSGI)
 ./run_server.sh -r local-ssl
 
-# Generate new migrations and start
-./run_server.sh -r local-dev -m
-
 # Load fixtures and start
 ./run_server.sh -r local-dev -l
 ```
 
 The development server starts at `http://localhost:8000`.
+
+### Database Migrations
+
+Migration files are committed to the repository under
+`publicationtrkr/apps/*/migrations/`. They are **not** generated at container
+start; `run_server.sh` only applies what has been reviewed and merged.
+
+When you change a model, generate the migration yourself and commit it:
+
+```bash
+python manage.py makemigrations
+# review the generated file, then
+git add publicationtrkr/apps/<app>/migrations/
+```
+
+On startup the server asserts that the committed migrations still describe the
+current models, and refuses to start if they do not:
+
+```
+### VERIFY committed migrations match models ###
+ERROR: models have changes with no corresponding committed migration.
+```
+
+That means a model change reached the branch without its migration. Generate and
+commit it rather than working around the check. Migrations used to be gitignored
+and regenerated on every container start, which meant the migration applied to
+production had never been reviewed and could differ between hosts.
 
 ---
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
+# Fail loudly. A failed migration must stop the boot, not fall through to
+# uwsgi and serve traffic against a database missing the migration.
+set -euo pipefail
+
 PARAMS=""
 while (("$#")); do
     case "$1" in
-    -m | --make-migrations)
-        MAKE_MIGRATIONS=1
-        shift
-        ;;
     -l | --load-fixtures)
         LOAD_FIXTURES=1
         shift
@@ -42,7 +42,7 @@ done
 eval set -- "$PARAMS"
 
 # ensure a valid run-mode was set
-case "$RUN_MODE" in
+case "${RUN_MODE:-}" in
     local-dev | local-ssl | docker)
         ;;
     *)
@@ -51,21 +51,8 @@ case "$RUN_MODE" in
         ;;
 esac
 
-# make app migrations
-if [[ "${MAKE_MIGRATIONS}" -eq 1 ]]; then
-    echo "### MAKE_MIGRATIONS = True ###"
-    APPS_LIST=(
-        "apiuser"
-        "publications"
-        "pubsimple"
-    )
-else
-    echo "### MAKE_MIGRATIONS = False ###"
-    APPS_LIST=()
-fi
-
 # load fixtures
-if [[ "${LOAD_FIXTURES}" -eq 1 ]]; then
+if [[ "${LOAD_FIXTURES:-0}" -eq 1 ]]; then
     echo "### LOAD_FIXTURES = True ###"
     FIXTURES_LIST=(
         "apiuser"
@@ -77,16 +64,32 @@ else
     FIXTURES_LIST=()
 fi
 
-# migrations files
-for app in "${APPS_LIST[@]}"; do
-    python manage.py makemigrations $app
-done
-python manage.py makemigrations
+# migrations
+#
+# Migration files are committed to the repo and are NOT generated here. This
+# script only applies what was reviewed and merged. If you changed a model,
+# run `python manage.py makemigrations` on your workstation and commit the
+# result -- see "Database Migrations" in README.md.
+#
+# The --check below asserts that the committed migrations still describe the
+# current models. It exits non-zero if a model change was merged without its
+# migration, which (with set -e) stops the boot rather than letting the app
+# serve against a schema that does not match the code.
+echo "### VERIFY committed migrations match models ###"
+if ! python manage.py makemigrations --check --dry-run; then
+    echo "" >&2
+    echo "ERROR: models have changes with no corresponding committed migration." >&2
+    echo "       Run 'python manage.py makemigrations' locally, review the" >&2
+    echo "       generated file, and commit it. Refusing to start." >&2
+    exit 1
+fi
+
+echo "### APPLY migrations ###"
 python manage.py showmigrations
 python manage.py migrate
 
 # load fixtures
-for fixture in "${FIXTURES_LIST[@]}"; do
+for fixture in "${FIXTURES_LIST[@]+"${FIXTURES_LIST[@]}"}"; do
     python manage.py loaddata $fixture
 done
 

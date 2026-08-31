@@ -38,11 +38,18 @@ if os.getenv('API_DEBUG').casefold() == 'true':
 else:
     API_DEBUG = False
 
-# Update hosts for production use
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-]
+# Hosts and CORS origins are environment-driven so that no deployment has to
+# edit this file. Both variables are comma-separated and are *added* to the
+# loopback defaults, which are always present.
+
+
+def _csv_env(name: str) -> list[str]:
+    return [v.strip() for v in os.getenv(name, '').split(',') if v.strip()]
+
+
+ALLOWED_HOSTS = list(dict.fromkeys(
+    ["localhost", "127.0.0.1"] + _csv_env('DJANGO_ALLOWED_HOSTS')
+))
 
 # Application definition
 
@@ -75,10 +82,9 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    'https://127.0.0.1',
-    'https://localhost',
-]
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
+    ['https://127.0.0.1', 'https://localhost'] + _csv_env('DJANGO_CORS_ALLOWED_ORIGINS')
+))
 
 CORS_ALLOW_METHODS = (
     "DELETE",
@@ -117,7 +123,7 @@ SPECTACULAR_SETTINGS = {
     # 'PREPROCESSING_HOOKS': ['artifactmgr.server.api_filters.preprocessing_filter_spec'],
     'TITLE': 'FABRIC Publication Tracker',
     'DESCRIPTION': 'A platform for sharing FABRIC related publications.',
-    'VERSION': '1.9.9',
+    'VERSION': '1.10.0',
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
     'COMPONENT_SPLIT_REQUEST': True,
