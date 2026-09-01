@@ -17,6 +17,7 @@ A Django web application for tracking research publications that utilize [FABRIC
   - [Deployment-Specific Configuration](#deployment-specific-configuration)
   - [Local Development](#local-development)
   - [Database Migrations](#database-migrations)
+  - [FABRIC User Sync](#fabric-user-sync)
 - [Initial Setup](#initial-setup)
 - [Web Interface](#web-interface)
 - [REST API](#rest-api)
@@ -44,6 +45,7 @@ Users authenticate via FABRIC's federated identity (CILogon / OAuth2). Role-base
 | `pubtrkr-database` | `postgres:18` | 5432 | PostgreSQL database |
 | `pubtrkr-nginx` | `nginx:1` | 8080 (HTTP), 8443 (HTTPS) | Reverse proxy + SSL termination |
 | `pubtrkr-vouch-proxy` | `fabrictestbed/vouch-proxy:0.27.1` | 9090 (internal) | OAuth2/OIDC authentication |
+| `pubtrkr-cron` | same image as `django` | none | Scheduled FABRIC user sync ([FABRIC User Sync](#fabric-user-sync)) |
 
 The Django application runs outside of Docker (via `run_server.sh`) for local development, or can be containerized using the provided `Dockerfile` for production. Alternate compose files in `compose/` provide configurations for local-ssl and production-ssl deployments.
 
@@ -53,7 +55,7 @@ All services communicate on a private bridge network (`pubtrkr-network`).
 
 | App | Models | Purpose |
 |---|---|---|
-| `apiuser` | `ApiUser`, `TaskTimeoutTracker` | FABRIC identity, role caching |
+| `apiuser` | `ApiUser`, `TaskTimeoutTracker` | FABRIC identity, role caching, directory sync |
 | `publications` | `Publication`, `Author` | Full BibTeX-enabled publication tracking |
 
 ### Authentication Flow
@@ -128,7 +130,6 @@ cp env.template .env
 | `PUBLICATION_TRACKER_ADMINS_ROLE` | `publication-tracker-admins` | FABRIC role granting admin access |
 | `CAN_CREATE_PUBLICATION_ROLE` | `Jupyterhub` | FABRIC role allowing publication creation |
 | `API_USER_REFRESH_CHECK_MINUTES` | `5` | How often to re-fetch user details from FABRIC Core API (minutes) |
-| `AUTHOR_REFRESH_CHECK_DAYS` | `1` | How often to refresh author data (days) |
 | `API_USER_ANON_UUID` | `00000000-0000-0000-0000-000000000000` | UUID for the anonymous (unauthenticated) user |
 | `API_USER_ANON_NAME` | `Anonymous API User` | Display name for anonymous user |
 
@@ -136,15 +137,15 @@ cp env.template .env
 
 | Variable | Default | Description |
 |---|---|---|
-| `ARC_NAME` | `author_refresh_check` | Author Refresh Check task name |
-| `ARC_DESCRIPTION` | `Author Refresh Check` | Author Refresh Check description |
-| `ARC_TIMEOUT_IN_SECONDS` | `86400` | Author Refresh Check timeout (seconds) |
 | `PSK_NAME` | `public_signing_key` | Public Signing Key task name |
 | `PSK_DESCRIPTION` | `Public Signing Key` | Public Signing Key description |
 | `PSK_TIMEOUT_IN_SECONDS` | `86400` | Public Signing Key cache timeout (seconds) |
 | `TRL_NAME` | `token_revocation_list` | Token Revocation List task name |
 | `TRL_DESCRIPTION` | `Token Revocation List` | Token Revocation List description |
 | `TRL_TIMEOUT_IN_SECONDS` | `300` | Token Revocation List cache timeout (seconds) |
+| `USR_NAME` | `user_sync_check` | User Sync task name; its `value` holds the sync watermark |
+| `USR_DESCRIPTION` | `User Sync Check` | User Sync description |
+| `USR_TIMEOUT_IN_SECONDS` | `86400` | Intended sync cadence, consulted by `sync_fabric_users --if-due` |
 
 #### FABRIC Services
 
@@ -153,6 +154,10 @@ cp env.template .env
 | `FABRIC_CORE_API` | `https://uis.fabric-testbed.net/` | FABRIC Core API base URL |
 | `FABRIC_CREDENTIAL_MANAGER` | `https://cm.fabric-testbed.net/` | Credential Manager URL |
 | `FABRIC_PORTAL` | `https://portal.fabric-testbed.net` | FABRIC Portal base URL (used for project links) |
+| `FABRIC_CORE_API_TOKEN` | — | Read-only Core API service token used by the user sync. Server-to-server only |
+| `FABRIC_HTTP_TIMEOUT_SECONDS` | `10` | Outbound timeout for calls made on the request path |
+| `FABRIC_SYNC_HTTP_TIMEOUT_SECONDS` | `60` | Outbound timeout for the user sync, which runs off the request path |
+| `USER_SYNC_CRON_SCHEDULE` | `0 3 * * *` | Crontab schedule for the `pubtrkr-cron` sidecar |
 
 #### Vouch Proxy
 
@@ -347,6 +352,61 @@ production had never been reviewed and could differ between hosts.
 
 ---
 
+### FABRIC User Sync
+
+`ApiUser` used to be a cache of people who had logged in, filled lazily on first
+authenticated request. That made it useless as a directory: the author-claim flow
+could only offer people who had already visited. `sync_fabric_users` populates it
+from the whole FABRIC population instead, reading `GET /journey-tracker/people` on
+Core API (~3,300 people, returned unpaginated).
+
+```bash
+python manage.py sync_fabric_users             # incremental: watermark -> now
+python manage.py sync_fabric_users --dry-run   # preview, writes nothing
+python manage.py sync_fabric_users --full      # whole population, walked backwards
+python manage.py sync_fabric_users --since 2026-01-01
+python manage.py sync_fabric_users --if-due    # no-op unless the cadence has elapsed
+```
+
+The endpoint filters on the person's `updated` timestamp and rejects a window wider
+than 90 days, so a backfill is walked in 89-day chunks — currently 28 requests,
+about 11 seconds. The watermark lives in the `user_sync_check` `TaskTimeoutTracker`
+row and is advanced **only** when every window in a run succeeded; a window that
+could not be read aborts the run, because a watermark moved past people who were
+never read would hide them until the next full backfill.
+
+**What the sync will not do.** It never deletes: `Publication.created_by` and
+`modified_by` are `SET_NULL`, so removing an `ApiUser` silently destroys publication
+provenance. Deactivated people are marked `active=False` and kept. It also never
+writes `cilogon_id`, `access_expires`, `access_type` or `has_logged_in` on a row that
+already exists — those belong to the login path. `/journey-tracker/people` does not
+return `cilogon_id`, which is our login join key, and that resolves itself: a synced
+row leaves it blank, and the first time that person signs in, `auth_user_by_cookie` /
+`auth_user_by_token` find the row by `uuid` and fill it in.
+
+#### Schedule
+
+The `pubtrkr-cron` sidecar runs the sync on `USER_SYNC_CRON_SCHEDULE` (daily at 03:00
+UTC by default). It reuses the django image and the same `./:/code` mount so it reads
+the identical `.env`, but overrides the entrypoint — `docker-entrypoint.sh` would run
+migrations, collectstatic and a second uwsgi. Its output is redirected to
+`/proc/1/fd/1` so runs appear in the container log:
+
+```bash
+docker compose logs -f cron
+```
+
+Two syncs cannot corrupt the watermark by interleaving. The command takes a Postgres
+advisory lock, which holds across containers, so an operator running a backfill by
+hand while the sidecar fires simply causes the second run to exit without syncing.
+
+The sidecar exists only in `docker-compose.yml` and `compose/docker-compose.yml.prod-ssl`.
+`compose/docker-compose.yml.local-ssl` has no `django` service — Django runs on the host
+there — so there is no image for it to reuse; run `python manage.py sync_fabric_users`
+by hand in local development.
+
+---
+
 ## Initial Setup
 
 After the database is up, run these once to initialize required records:
@@ -357,6 +417,11 @@ python manage.py migrate
 python manage.py collectstatic --no-input
 python manage.py init_anon_api_user
 python manage.py init_task_timeout_tracker
+
+# First population of the user directory (~3,300 people, about 11 seconds).
+# Preview it first; see "FABRIC User Sync" for what this does and does not touch.
+python manage.py sync_fabric_users --full --dry-run
+python manage.py sync_fabric_users --full
 ```
 
 ## Web Interface

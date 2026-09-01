@@ -5,6 +5,11 @@
 
 services:
 
+# No cron sidecar here. This variant has no `django` service -- Django runs on the
+# host via `run_server.sh --run-mode local-ssl` -- so there is no image for the
+# sidecar to reuse and no container-usable .venv on the bind mount. Run the user
+# sync by hand instead: `python manage.py sync_fabric_users`.
+
   database:
     # default port 5432
     image: postgres:16

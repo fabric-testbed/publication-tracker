@@ -8,18 +8,22 @@ from publicationtrkr.apps.apiuser.models import TaskTimeoutTracker
 
 # (name, description, timeout) environment keys for each tracked task
 TRACKERS = (
-    ('ARC_NAME', 'ARC_DESCRIPTION', 'ARC_TIMEOUT_IN_SECONDS'),
     ('PSK_NAME', 'PSK_DESCRIPTION', 'PSK_TIMEOUT_IN_SECONDS'),
     ('TRL_NAME', 'TRL_DESCRIPTION', 'TRL_TIMEOUT_IN_SECONDS'),
+    ('USR_NAME', 'USR_DESCRIPTION', 'USR_TIMEOUT_IN_SECONDS'),
 )
 
 
 def init_task_timeout_tracker():
     """
     Initialize/Update the TaskTimeoutTracker table
-    - author_refresh_check
     - public_signing_key
     - token_revocation_list
+    - user_sync_check
+
+    ARC / author_refresh_check is deliberately gone: it was scaffolding for an
+    abandoned earlier attempt at user sync, initialized on every boot and read by
+    nothing. Migration 0003 removes the row it left on deployed databases.
 
     Keyed on name via update_or_create so re-running against a database that
     already holds these rows updates them in place. The previous

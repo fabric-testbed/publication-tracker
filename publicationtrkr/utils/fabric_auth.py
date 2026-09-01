@@ -146,17 +146,12 @@ def auth_user_by_cookie(cookie: str) -> ApiUser:
             api_user.name = fab_person.json().get('results', [])[0].get('name')
             api_user.cilogon_id = fab_person.json().get('results', [])[0].get('cilogon_id')
             api_user.access_type = ApiUser.COOKIE
-            projects = []
-            fabric_roles = []
-            for r in fab_person.json().get('results', [])[0].get('roles'):
-                if is_valid_uuid(r.get('name')[:-3]):
-                    projects.append(r.get('name')[:-3])
-                    continue
-                else:
-                    fabric_roles.append(r.get('name'))
-
-            api_user.projects = list(set(projects))
-            api_user.fabric_roles = list(set(fabric_roles))
+            # This row now has a real session behind it, whether it was created here or
+            # by sync_fabric_users. cilogon_id was set just above, which is the join key
+            # a synced row is missing until its owner first logs in.
+            api_user.has_logged_in = True
+            roles = [r.get('name') for r in fab_person.json().get('results', [])[0].get('roles')]
+            api_user.projects, api_user.fabric_roles = split_fabric_roles(roles)
         else:
             api_user = ApiUser.objects.filter(uuid=os.getenv('API_USER_ANON_UUID')).first()
     except Exception as exc:
@@ -189,17 +184,12 @@ def auth_user_by_token(token):
             api_user.name = fab_person.json().get('results', [])[0].get('name')
             api_user.cilogon_id = fab_person.json().get('results', [])[0].get('cilogon_id')
             api_user.access_type = ApiUser.TOKEN
-            projects = []
-            fabric_roles = []
-            for r in fab_person.json().get('results', [])[0].get('roles'):
-                if is_valid_uuid(r.get('name')[:-3]):
-                    projects.append(r.get('name')[:-3])
-                    continue
-                else:
-                    fabric_roles.append(r.get('name'))
-
-            api_user.projects = list(set(projects))
-            api_user.fabric_roles = list(set(fabric_roles))
+            # This row now has a real session behind it, whether it was created here or
+            # by sync_fabric_users. cilogon_id was set just above, which is the join key
+            # a synced row is missing until its owner first logs in.
+            api_user.has_logged_in = True
+            roles = [r.get('name') for r in fab_person.json().get('results', [])[0].get('roles')]
+            api_user.projects, api_user.fabric_roles = split_fabric_roles(roles)
         else:
             api_user = ApiUser.objects.filter(uuid=os.getenv('API_USER_ANON_UUID')).first()
     except Exception as exc:
@@ -290,3 +280,42 @@ def is_valid_uuid(val) -> bool:
         return True
     except ValueError:
         return False
+
+
+# Project roles come back from core-api as '<project_uuid><suffix>', where the suffix is
+# one of these. Matched explicitly rather than by the older "strip any three characters
+# and see whether a UUID is left" idiom: same result today, but it states the contract
+# instead of implying it, and it will not silently absorb some future three-character
+# suffix that ought to mean something else. Mirrors core-api's own people_utils.py.
+# '-pc' was removed in core-api v1.10.0 and is deliberately absent.
+PROJECT_ROLE_SUFFIXES = ('-pm', '-po', '-tk')
+
+
+def split_fabric_roles(roles) -> tuple[list[str], list[str]]:
+    """
+    Split a flat list of core-api role names into (projects, fabric_roles).
+
+    Anything that is not '<project_uuid><suffix>' is a global FABRIC role --
+    'Jupyterhub', 'fabric-active-users', 'publication-tracker-admins', 'project-leads',
+    and so on. That set is deliberately open-ended: a global role we have never seen
+    falls through to fabric_roles, which is the right default, so new ones need no
+    change here.
+
+    Both lists are de-duplicated and sorted, so re-reading the same roles produces the
+    same value and the sync does not record a spurious change.
+
+    This lived inline and verbatim in both auth_user_by_cookie and auth_user_by_token;
+    sync_fabric_users would have made it a third copy.
+    """
+    projects = []
+    fabric_roles = []
+    for role in roles or []:
+        if not role:
+            continue
+        for suffix in PROJECT_ROLE_SUFFIXES:
+            if role.endswith(suffix) and is_valid_uuid(role[:-len(suffix)]):
+                projects.append(role[:-len(suffix)])
+                break
+        else:
+            fabric_roles.append(role)
+    return sorted(set(projects)), sorted(set(fabric_roles))

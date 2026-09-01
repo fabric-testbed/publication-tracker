@@ -9,8 +9,12 @@ ADD https://astral.sh/uv/install.sh /uv-installer.sh
 RUN sh /uv-installer.sh && rm /uv-installer.sh
 ENV PATH="/root/.local/bin:$PATH"
 
+# cron is NOT present in the python:3 base image (only flock is), so the user-sync
+# sidecar has to bring it in here. The sidecar reuses this same image and overrides
+# ENTRYPOINT; the django service never starts cron.
 RUN apt-get update --yes \
   && apt-get install --yes --no-install-recommends \
+  cron \
   postgresql-client \
   && mkdir /code/ \
   && apt-get clean && rm -rf /var/lib/apt/lists/*

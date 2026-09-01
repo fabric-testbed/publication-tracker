@@ -26,6 +26,24 @@ services:
       - LOAD_FIXTURES=${LOAD_FIXTURES:-0}
     restart: unless-stopped
 
+  cron:
+    # user-sync sidecar (issue #23). Reuses the django image and the same ./:/code
+    # mount so it picks up the identical .env, but overrides ENTRYPOINT: the default
+    # docker-entrypoint.sh runs migrations, collectstatic and a second uwsgi.
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: pubtrkr-cron
+    entrypoint: ["/code/docker-entrypoint-cron.sh"]
+    networks:
+      - pubtrkr-network
+    depends_on:
+      - database
+      - django
+    volumes:
+      - ./:/code
+    restart: unless-stopped
+
   database:
     # default port 5432
     image: postgres:15
