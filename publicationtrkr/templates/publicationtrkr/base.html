@@ -45,6 +45,19 @@
         });
     });
 
+    // Confirm before running a destructive action.
+    // The confirmation text is read from a data attribute instead of being
+    // interpolated into an inline onclick handler: HTML escaping is not enough
+    // inside a JavaScript string literal, because the HTML parser decodes
+    // character references (&#x27; and friends) before the JavaScript is
+    // compiled, which lets a crafted value break out of the string.
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.js-confirm-delete');
+        if (btn && !window.confirm('Delete Publication: ' + btn.dataset.confirmTitle + '?')) {
+            e.preventDefault();
+        }
+    });
+
     // Copy to clipboard utility
     function copyToClipboard(btn, text) {
         navigator.clipboard.writeText(text).then(function () {
@@ -68,6 +81,15 @@
             }, 1500);
         });
     }
+
+    // Copy buttons carry their value in a data attribute rather than in an
+    // inline onclick handler, for the same escaping-context reason as above.
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.js-copy-clipboard');
+        if (btn) {
+            copyToClipboard(btn, btn.dataset.copyText || '');
+        }
+    });
 </script>
 </body>
 </html>

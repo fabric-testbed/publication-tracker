@@ -226,6 +226,30 @@ def author_update(request, *args, **kwargs):
             'debug': API_DEBUG,
         })
 
+    # Claiming an *unclaimed* author is the honor system, and is deliberate: author
+    # strings on a paper are ambiguous ('Smith, J.' / 'Jane Smith' / 'J. Smith') and
+    # self-assertion is the only signal available today. Taking a claim away from the
+    # user who already made it is not part of that bargain -- the non-admin branch below
+    # overwrites fabric_uuid unconditionally, so without this check any user holding
+    # CAN_CREATE_PUBLICATION_ROLE could silently de-attribute someone else's work.
+    # Admins keep the reassignment branch below as the escape hatch for a wrong claim.
+    if not api_user.is_publication_tracker_admin and author.fabric_uuid \
+            and author.fabric_uuid != api_user.uuid:
+        return render(request, 'author_update.html', {
+            'api_user': api_user.as_dict(),
+            'author': {
+                'uuid': author.uuid,
+                'author_name': author.author_name,
+                'display_name': author.display_name,
+                'fabric_uuid': author.fabric_uuid,
+                'publication_uuid': author.publication_uuid,
+            },
+            'message': 'PermissionDenied: this author is already claimed by another '
+                       'FABRIC user. Contact a publication tracker admin if the claim '
+                       'is incorrect.',
+            'debug': API_DEBUG,
+        })
+
     if request.method == "POST" and isinstance(request.POST.get('save'), str):
         form = AuthorForm(request.POST, instance=author, api_user=api_user)
         if form.is_valid():

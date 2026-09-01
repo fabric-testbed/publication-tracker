@@ -19,6 +19,22 @@ from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
 
 
+class IsPublicationTrackerAdminOrReadOnly(permissions.BasePermission):
+    """
+    Read for anyone, write for publication tracker admins only.
+
+    Identity comes from get_api_user() rather than request.user: this project sets
+    DEFAULT_AUTHENTICATION_CLASSES to [], and the caller is resolved from a Vouch
+    cookie or a FABRIC bearer token, so request.user is always anonymous here and
+    must not be consulted.
+    """
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return get_api_user(request=request).is_publication_tracker_admin
+
+
 class DynamicSearchFilter(filters.SearchFilter):
     def get_search_fields(self, view, request):
         if request.parser_context.get('view').action == 'list':
@@ -41,6 +57,23 @@ class AuthorSearchFilter(filters.SearchFilter):
 
     def get_search_fields(self, view, request):
         return ['author_name', 'display_name']
+
+def is_publication_owner(api_user, publication) -> bool:
+    """
+    Whether api_user created publication.
+
+    Compares uuid strings. This used to read `api_user.uuid == publication.created_by`,
+    which compares a str against an ApiUser instance and is therefore always False --
+    so in practice only admins could update or delete anything, and an owner acting on
+    their own publication was silently refused.
+
+    created_by is on_delete=SET_NULL, so it can be None; a publication whose creator
+    was removed has no owner rather than being owned by everyone.
+    """
+    if api_user is None or publication.created_by is None:
+        return False
+    return str(api_user.uuid) == str(publication.created_by.uuid)
+
 
 class PublicationViewSet(viewsets.ModelViewSet):
     """
@@ -232,14 +265,12 @@ class PublicationViewSet(viewsets.ModelViewSet):
         - title
         - year
         """
-        print(kwargs)
-        print(request.data)
         publication_uuid = request.data.get('uuid', None)
         if not publication_uuid:
             publication_uuid = kwargs.get('uuid')
         publication = get_object_or_404(Publication, uuid=publication_uuid)
         api_user = get_api_user(request=request)
-        if api_user.uuid == publication.created_by or api_user.is_publication_tracker_admin:
+        if is_publication_owner(api_user, publication) or api_user.is_publication_tracker_admin:
             is_valid, message = validate_publication_update(request, api_user=api_user)
             if is_valid:
                 now = datetime.now(timezone.utc)
@@ -364,7 +395,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
             publication_uuid = kwargs.get('uuid')
         publication = get_object_or_404(Publication, uuid=publication_uuid)
         api_user = get_api_user(request=request)
-        if api_user.uuid == publication.created_by or api_user.is_publication_tracker_admin:
+        if is_publication_owner(api_user, publication) or api_user.is_publication_tracker_admin:
             Author.objects.filter(publication_uuid=publication.uuid).delete()
             publication.delete()
             return Response(status=204)
@@ -478,9 +509,19 @@ class PublicationViewSet(viewsets.ModelViewSet):
 
 
 class AuthorViewSet(viewsets.ModelViewSet):
+    """
+    Author records.
+
+    Reads are public -- the author directory backs anonymous publication browsing.
+    Writes are admin-only: this viewset previously ran with AllowAny and performed no
+    authorization in any handler, so POST/PUT/PATCH/DELETE on /api/authors were open
+    to anyone on the internet. Nothing in the UI writes through here; author records
+    are created by the publication write path, and claiming goes through the
+    author_update web view, which has its own checks.
+    """
     serializer_class = AuthorSerializer
     queryset = Author.objects.all().order_by('author_name')
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsPublicationTrackerAdminOrReadOnly]
     filter_backends = [AuthorSearchFilter]
     lookup_field = 'uuid'
 

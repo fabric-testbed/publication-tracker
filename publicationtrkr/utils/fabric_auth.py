@@ -11,6 +11,12 @@ import requests
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
 
+# Outbound HTTP timeout, in seconds, for every call in this module. All of them sit on
+# the authentication path, so an unbounded request holds a uwsgi worker (4 processes x
+# 2 threads = 8 concurrent slots) until the peer gives up -- a trivially reachable
+# denial of service, and the trigger for the fail-open revocation list fixed below.
+FABRIC_HTTP_TIMEOUT = float(os.getenv('FABRIC_HTTP_TIMEOUT_SECONDS', '10'))
+
 
 def get_api_user(request) -> ApiUser:
     """
@@ -31,7 +37,12 @@ def get_api_user(request) -> ApiUser:
             if oidc_sub:
                 api_user = ApiUser.objects.filter(cilogon_id=oidc_sub).first()
                 if api_user:
-                    if api_user.access_expires > now:
+                    # access_expires is nullable. Comparing None to a datetime raises
+                    # TypeError, which the broad except below swallows -- silently
+                    # downgrading a valid caller to anonymous. A row synced from
+                    # core-api rather than created by a login has no access_expires,
+                    # so this stops being hypothetical once user sync lands.
+                    if api_user.access_expires and api_user.access_expires > now:
                         return api_user
                 api_user = auth_user_by_token(token=token)
                 api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
@@ -41,7 +52,12 @@ def get_api_user(request) -> ApiUser:
             if oidc_sub:
                 api_user = ApiUser.objects.filter(cilogon_id=oidc_sub).first()
                 if api_user:
-                    if api_user.access_expires > now:
+                    # access_expires is nullable. Comparing None to a datetime raises
+                    # TypeError, which the broad except below swallows -- silently
+                    # downgrading a valid caller to anonymous. A row synced from
+                    # core-api rather than created by a login has no access_expires,
+                    # so this stops being hypothetical once user sync lands.
+                    if api_user.access_expires and api_user.access_expires > now:
                         return api_user
                 api_user = auth_user_by_cookie(cookie=cookie)
                 api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
@@ -85,7 +101,8 @@ def get_oidc_sub_from_token(token: str) -> str | None:
         if not psk.timed_out():
             public_signing_key = jwt.PyJWK(json.loads(psk.value)).key
         else:
-            api_call = s.get(url=os.getenv('FABRIC_CREDENTIAL_MANAGER') + '/credmgr/certs')
+            api_call = s.get(url=os.getenv('FABRIC_CREDENTIAL_MANAGER') + '/credmgr/certs',
+                              timeout=FABRIC_HTTP_TIMEOUT)
             jwks = api_call.json().get('keys')[0]
             public_signing_key = jwt.PyJWK(jwks).key
             psk.value = json.dumps(jwks)
@@ -115,14 +132,15 @@ def auth_user_by_cookie(cookie: str) -> ApiUser:
     s = requests.Session()
     try:
         s.cookies.set(os.getenv('VOUCH_COOKIE_NAME'), cookie)
-        whoami = s.get(url=os.getenv('FABRIC_CORE_API') + '/whoami')
+        whoami = s.get(url=os.getenv('FABRIC_CORE_API') + '/whoami', timeout=FABRIC_HTTP_TIMEOUT)
         api_user_uuid = whoami.json().get('results', [])[0].get('uuid', os.getenv('API_USER_ANON_UUID'))
         if api_user_uuid and api_user_uuid != os.getenv('API_USER_ANON_UUID'):
             api_user = ApiUser.objects.filter(uuid=api_user_uuid).first()
             if not api_user:
                 api_user = ApiUser()
             api_user.uuid = api_user_uuid
-            fab_person = s.get(url=os.getenv('FABRIC_CORE_API') + '/people/{0}?as_self=true'.format(api_user.uuid))
+            fab_person = s.get(url=os.getenv('FABRIC_CORE_API') + '/people/{0}?as_self=true'.format(api_user.uuid),
+                              timeout=FABRIC_HTTP_TIMEOUT)
             api_user.affiliation = fab_person.json().get('results', [])[0].get('affiliation')
             api_user.email = fab_person.json().get('results', [])[0].get('email')
             api_user.name = fab_person.json().get('results', [])[0].get('name')
@@ -157,14 +175,15 @@ def auth_user_by_token(token):
     s = requests.Session()
     try:
         s.headers['Authorization'] = 'Bearer {0}'.format(token)
-        whoami = s.get(url=os.getenv('FABRIC_CORE_API') + '/whoami')
+        whoami = s.get(url=os.getenv('FABRIC_CORE_API') + '/whoami', timeout=FABRIC_HTTP_TIMEOUT)
         api_user_uuid = whoami.json().get('results', [])[0].get('uuid', os.getenv('API_USER_ANON_UUID'))
         if api_user_uuid and api_user_uuid != os.getenv('API_USER_ANON_UUID'):
             api_user = ApiUser.objects.filter(uuid=api_user_uuid).first()
             if not api_user:
                 api_user = ApiUser()
             api_user.uuid = api_user_uuid
-            fab_person = s.get(url=os.getenv('FABRIC_CORE_API') + '/people/{0}?as_self=true'.format(api_user.uuid))
+            fab_person = s.get(url=os.getenv('FABRIC_CORE_API') + '/people/{0}?as_self=true'.format(api_user.uuid),
+                              timeout=FABRIC_HTTP_TIMEOUT)
             api_user.affiliation = fab_person.json().get('results', [])[0].get('affiliation')
             api_user.email = fab_person.json().get('results', [])[0].get('email')
             api_user.name = fab_person.json().get('results', [])[0].get('name')
@@ -192,9 +211,20 @@ def auth_user_by_token(token):
 
 def is_token_revoked(token: str) -> bool:
     """
-    Check all incoming tokens against a token revocation list (TRL)
+    Check an incoming token against the Token Revocation List (TRL)
+
+    Fails CLOSED. If no revocation list can be obtained at all -- not from the cache,
+    not from the Credential Manager -- the token is treated as revoked. An unreachable
+    TRL is precisely the situation in which a revoked token would otherwise keep
+    working, so "unknown" has to mean "deny".
+
+    Denying here only skips the bearer-token branch of get_api_user(); a request that
+    also carries a valid Vouch cookie still authenticates by cookie.
     """
     revocation_list = get_token_revocation_list()
+    if revocation_list is None:
+        print('TRL unavailable - refusing token authentication')
+        return True
     try:
         token_hash = hashlib.new('sha256')
         token_hash.update(token.encode())
@@ -206,26 +236,52 @@ def is_token_revoked(token: str) -> bool:
     return False
 
 
-def get_token_revocation_list() -> [str]:
+def get_token_revocation_list() -> list | None:
     """
     Retrieve Token Revocation List (TRL) from CM at some interval
+
+    Returns None when no list could be obtained, which the caller treats as "deny".
+    Returning an empty list for that case is what made revocation fail open: an empty
+    list is indistinguishable from "nothing is revoked", so every token read as valid
+    for the duration of any CM outage.
+
+    A stale cached list still describes every token revoked up to the moment it was
+    written, so a failed refresh falls back to it rather than discarding it.
     """
-    s = requests.Session()
+    trl = None
     try:
         trl = TaskTimeoutTracker.objects.get(name=os.getenv('TRL_NAME'))
-        if not trl.timed_out():
-            token_revocation_list = json.loads(trl.value)
-        else:
-            api_call = s.get(url=os.getenv('FABRIC_CREDENTIAL_MANAGER') + '/credmgr/tokens/revoke_list')
-            token_revocation_list = api_call.json().get('data')
+        if not trl.timed_out() and trl.value:
+            return list(json.loads(trl.value))
+    except Exception as exc:
+        print(exc)
+
+    s = requests.Session()
+    try:
+        api_call = s.get(url=os.getenv('FABRIC_CREDENTIAL_MANAGER') + '/credmgr/tokens/revoke_list',
+                         timeout=FABRIC_HTTP_TIMEOUT)
+        api_call.raise_for_status()
+        token_revocation_list = api_call.json().get('data')
+        if token_revocation_list is None:
+            raise ValueError('revoke_list response contained no "data" key')
+        if trl:
             trl.value = json.dumps(token_revocation_list)
             trl.last_updated = datetime.now(timezone.utc)
             trl.save()
+        return list(token_revocation_list)
     except Exception as exc:
         print(exc)
-        token_revocation_list = []
-    s.close()
-    return list(token_revocation_list)
+    finally:
+        s.close()
+
+    # Refresh failed -- fall back to the last cached list if there is one.
+    try:
+        if trl and trl.value:
+            print('TRL refresh failed - falling back to cached revocation list')
+            return list(json.loads(trl.value))
+    except Exception as exc:
+        print(exc)
+    return None
 
 
 def is_valid_uuid(val) -> bool:

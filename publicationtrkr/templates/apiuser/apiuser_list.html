@@ -68,8 +68,8 @@
                         <td>{{ user.email }}</td>
                         <td>
                             <code>{{ user.uuid }}</code>
-                            <button type="button" class="btn-copy btn-copy-sm"
-                                    onclick="copyToClipboard(this, '{{ user.uuid }}')"
+                            <button type="button" class="btn-copy btn-copy-sm js-copy-clipboard"
+                                    data-copy-text="{{ user.uuid }}"
                                     title="Copy UUID to clipboard"
                                     data-bs-toggle="tooltip" data-bs-placement="top">
                                 <i class="fa fa-copy"></i>

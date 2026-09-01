@@ -1,4 +1,6 @@
 from django import forms
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.forms import CheckboxSelectMultiple
 
 from publicationtrkr.apps.publications.models import Author, Publication
@@ -101,6 +103,19 @@ class PublicationForm(forms.ModelForm):
             cleaned_data['title'] = bibtex_data['title']
         else:
             self.add_error(None, 'Title: must provide a title directly or via BibTeX.')
+
+        # resolve link: manual input overrides bibtex, http(s) schemes only
+        link = cleaned_data.get('link', '').strip()
+        if not link and bibtex_data.get('link'):
+            link = str(bibtex_data['link']).strip()
+        if link:
+            try:
+                URLValidator(schemes=['http', 'https'])(link)
+                cleaned_data['link'] = link
+            except ValidationError:
+                self.add_error(None, 'Link: must be a valid http:// or https:// URL.')
+        else:
+            cleaned_data['link'] = ''
 
         # resolve year: manual input overrides bibtex
         year = cleaned_data.get('year', '').strip()

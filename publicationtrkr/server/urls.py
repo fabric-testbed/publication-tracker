@@ -22,11 +22,9 @@ from rest_framework import routers
 
 from publicationtrkr.server.views import landing_page, logout_view
 
-from publicationtrkr.apps.pubsimple.api.viewsets import PubSimpleViewSet
 from publicationtrkr.apps.publications.api.viewsets import AuthorViewSet, PublicationViewSet
 
 router = routers.DefaultRouter(trailing_slash=False)
-router.register(r'pubsimple', PubSimpleViewSet, basename='pubsimple')
 router.register(r'authors', AuthorViewSet, basename='authors')
 router.register(r'publications', PublicationViewSet, basename='publications')
 
@@ -34,7 +32,6 @@ urlpatterns = [
     path('', landing_page, name='home'),
     path('logout', logout_view, name='logout'),
     path('apiusers/', include('publicationtrkr.apps.apiuser.urls')),
-    path('pubsimple/', include('publicationtrkr.apps.pubsimple.urls')),
     path('publications/', include('publicationtrkr.apps.publications.urls')),
     path('admin/', admin.site.urls),
     path('api/', include((router.urls, 'publicationtrkr.apps'))),

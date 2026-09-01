@@ -30,7 +30,6 @@ A Django web application for tracking research publications that utilize [FABRIC
 The FABRIC Publication Tracker allows FABRIC users and operators to record, browse, and manage research publications associated with FABRIC projects. It supports two publication workflows:
 
 - **Full publications** (`publications` app) — Rich entries with BibTeX import/export, author claiming, and FABRIC project linkage.
-- **Simple publications** (`pubsimple` app) — Lightweight manual entries for quick data capture.
 
 Users authenticate via FABRIC's federated identity (CILogon / OAuth2). Role-based permissions control who can create publications and who has admin access.
 
@@ -56,7 +55,6 @@ All services communicate on a private bridge network (`pubtrkr-network`).
 |---|---|---|
 | `apiuser` | `ApiUser`, `TaskTimeoutTracker` | FABRIC identity, role caching |
 | `publications` | `Publication`, `Author` | Full BibTeX-enabled publication tracking |
-| `pubsimple` | `PubSimple` | Simple publication entries |
 
 ### Authentication Flow
 
@@ -361,22 +359,6 @@ python manage.py init_anon_api_user
 python manage.py init_task_timeout_tracker
 ```
 
-### Migrate data from PubSimple to Publications
-
-If you have existing `PubSimple` records and want to promote them to full `Publication` entries:
-
-```bash
-# Preview what would be imported
-python manage.py import_from_pubsimple --dry-run
-
-# Run the import
-python manage.py import_from_pubsimple
-```
-
-The command preserves original `created`/`modified` timestamps and `created_by`/`modified_by` references. Records with duplicate (title, link) combinations are skipped.
-
----
-
 ## Web Interface
 
 All pages are accessible at `https://<host>:8443/`.
@@ -393,10 +375,6 @@ All pages are accessible at `https://<host>:8443/`.
 | `/publications/by-author-uuid/<fabric_uuid>` | All | All publications by a specific FABRIC user |
 | `/publications/projects/` | All | Publications grouped by FABRIC project (name, count, link) |
 | `/publications/projects/<project_uuid>` | All | All publications for a specific project |
-| `/pubsimple/` | All | Browse simple publications |
-| `/pubsimple/create/` | Authenticated | Create a simple publication |
-| `/pubsimple/<uuid>` | All | Simple publication detail |
-| `/pubsimple/<uuid>/update` | Owner, Admins | Edit a simple publication |
 | `/apiusers/` | Admins only | List all API users (name, email, UUID, affiliation) |
 | `/apiusers/<uuid>` | Admins only | API user detail (roles, projects, access info) |
 
@@ -574,31 +552,6 @@ curl "https://<host>:8443/api/authors?search=Smith"
 curl "https://<host>:8443/api/authors/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-#### Simple Publications — `/api/pubsimple`
-
-| Method | URL | Description |
-|---|---|---|
-| `GET` | `/api/pubsimple` | List simple publications |
-| `POST` | `/api/pubsimple` | Create a simple publication |
-| `GET` | `/api/pubsimple/<uuid>` | Get a simple publication |
-| `PUT` | `/api/pubsimple/<uuid>` | Update a simple publication |
-| `DELETE` | `/api/pubsimple/<uuid>` | Delete a simple publication |
-
-**Simple publication schema:**
-
-```json
-{
-  "authors": ["Smith, Jane", "Doe, John"],
-  "link": "https://doi.org/10.1000/example",
-  "project_name": "My FABRIC Project",
-  "project_uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "title": "Using FABRIC for Large-Scale Network Experiments",
-  "year": "2024"
-}
-```
-
----
-
 ## Authentication
 
 ### Web (Cookie-based)
@@ -653,40 +606,29 @@ publication-tracker/
     │   │   ├── views.py          # apiuser_list, apiuser_detail
     │   │   ├── tests.py
     │   │   ├── urls.py
+    │   │   ├── fixtures/         # apiuser.json
     │   │   └── management/commands/
     │   │       ├── init_anon_api_user.py
     │   │       └── init_task_timeout_tracker.py
-    │   ├── publications/         # Full publication tracking (BibTeX)
-    │   │   ├── models.py         # Publication, Author
-    │   │   ├── views.py          # publication_*, author_*
-    │   │   ├── tests.py
-    │   │   ├── urls.py
-    │   │   ├── forms.py          # PublicationForm, AuthorForm
-    │   │   ├── api/
-    │   │   │   ├── viewsets.py   # PublicationViewSet, AuthorViewSet
-    │   │   │   ├── serializers.py
-    │   │   │   └── validators.py
-    │   │   ├── templatetags/
-    │   │   │   └── publications_tags.py
-    │   │   └── management/commands/
-    │   │       └── import_from_pubsimple.py
-    │   └── pubsimple/            # Simple publication entries
-    │       ├── models.py         # PubSimple
-    │       ├── views.py
+    │   └── publications/         # Full publication tracking (BibTeX)
+    │       ├── models.py         # Publication, Author
+    │       ├── views.py          # publication_*, author_*
     │       ├── tests.py
     │       ├── urls.py
-    │       ├── fixtures/         # apiuser.json, pubsimple.json
-    │       └── api/
-    │           ├── viewsets.py   # PubSimpleViewSet
-    │           ├── serializers.py
-    │           └── validators.py
+    │       ├── forms.py          # PublicationForm, AuthorForm
+    │       ├── utils/
+    │       │   └── bibtex_utils.py   # BibTeX parsing & generation
+    │       ├── api/
+    │       │   ├── viewsets.py   # PublicationViewSet, AuthorViewSet
+    │       │   ├── serializers.py
+    │       │   └── validators.py
+    │       └── templatetags/
+    │           └── publications_tags.py
     ├── utils/
     │   ├── fabric_auth.py        # Cookie & bearer token authentication
-    │   ├── core_api.py           # FABRIC Core API wrappers
-    │   └── bibtex_utils.py       # BibTeX parsing & generation
+    │   └── core_api.py           # FABRIC Core API wrappers
     └── templates/
         ├── publicationtrkr/      # base.html, navbar.html, home.html, footer.html
         ├── apiuser/              # apiuser_list.html, apiuser_detail.html
-        ├── publications/         # publication_*.html, author_*.html
-        └── pubsimple/            # pubsimple_*.html
+        └── publications/         # publication_*.html, author_*.html
 ```

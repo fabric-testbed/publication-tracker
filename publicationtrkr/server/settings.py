@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 import os
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -21,10 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-if os.getenv('DJANGO_SECRET_KEY'):
-    SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
-else:
-    SECRET_KEY = 'django-insecure-58k5p&d&6ztt_i=l8$(94i&%s%h-kpznyu8^7m1pd=*wh@x^kr'
+# Fails closed. This used to fall back to a hardcoded 'django-insecure-...' literal,
+# which is committed here and mirrored to the public repository -- so a deployment that
+# forgot DJANGO_SECRET_KEY ran production on a publicly known key, signing sessions and
+# password-reset tokens with it, and said nothing. Every other required variable in this
+# file already raises at import when unset; this one now matches.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('DJANGO_SECRET_KEY is not set (see env.template)')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 if os.getenv('DJANGO_DEBUG').casefold() == 'true':
@@ -110,20 +115,67 @@ CORS_ALLOW_HEADERS = (
     "Range",
 )
 
-CORS_AlLOW_CREDENTIALS = True
+# Was CORS_AlLOW_CREDENTIALS (lowercase l) and therefore inert -- Django never read it,
+# so credentialed cross-origin requests have in practice been disallowed at this layer.
+# Keeping that behaviour rather than silently switching it on by fixing the spelling:
+# nginx sets Access-Control-Allow-Credentials itself, and which layer owns that header
+# is a deployment decision, not a typo fix.
+CORS_ALLOW_CREDENTIALS = False
+
+# Transport and cookie hardening. None of this was set: no SECURE_*, no CSRF_COOKIE_*,
+# no SESSION_COOKIE_*, no X_FRAME_OPTIONS.
+#
+# TLS terminates at nginx, which forwards X-Forwarded-Proto: https. Without
+# SECURE_PROXY_SSL_HEADER Django believes every request is plain http, so it would
+# refuse to set Secure cookies and request.is_secure() would be wrong.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Secure cookies off in DEBUG so local http development still works.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+# Django 4+ requires the scheme here for cross-origin POSTs. Derived from the same
+# env var as CORS so a deployment configures one list, not two.
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
+
+X_FRAME_OPTIONS = 'DENY'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+
+# HSTS defaults to OFF. Enabling it is effectively irreversible for anyone who has
+# visited -- browsers honour max-age regardless of what the site serves later -- so it
+# is opt-in per deployment rather than a default that ships and surprises someone.
+SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_PRELOAD = False
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': int(os.getenv('REST_FRAMEWORK_PAGE_SIZE')),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # There was no throttling of any kind. Identity here comes from get_api_user(),
+    # not request.user, so DRF sees every caller as anonymous -- AnonRateThrottle
+    # therefore buckets by IP, which is the right granularity for an API that is
+    # anonymously readable.
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.getenv('THROTTLE_ANON', '120/min'),
+        'bulk': os.getenv('THROTTLE_BULK', '6/hour'),
+    },
 }
 
 SPECTACULAR_SETTINGS = {
     # 'PREPROCESSING_HOOKS': ['artifactmgr.server.api_filters.preprocessing_filter_spec'],
     'TITLE': 'FABRIC Publication Tracker',
     'DESCRIPTION': 'A platform for sharing FABRIC related publications.',
-    'VERSION': '1.10.0',
+    'VERSION': '1.11.0',
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
     'COMPONENT_SPLIT_REQUEST': True,
@@ -137,7 +189,6 @@ TEMPLATES = [
         'DIRS': [
             os.path.join(BASE_DIR, 'publicationtrkr/templates'),
             os.path.join(BASE_DIR, 'publicationtrkr/templates/publicationtrkr'),
-            os.path.join(BASE_DIR, 'publicationtrkr/templates/pubsimple'),
             os.path.join(BASE_DIR, 'publicationtrkr/templates/publications'),
         ],
         'APP_DIRS': True,

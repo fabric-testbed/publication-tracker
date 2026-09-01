@@ -6,7 +6,8 @@
 # Mirrors a released version of the private repo into the public repo by:
 #   1. Cloning the private repo at the release tag (fresh checkout, like CI).
 #   2. Staging the files listed in .publish-include (supports comments,
-#      "dir/" entries, and "src:dest" renames).
+#      "dir/" entries, and "src:dest" renames). Only git-tracked files are
+#      staged, so untracked local secrets can never be published.
 #   3. Cloning the public repo, wiping its tracked content (except .git),
 #      and copying the staged files in.
 #   4. Committing + tagging, then pushing main + the tag (push is gated).
@@ -80,39 +81,63 @@ echo "--- Cloning private repo at ${RELEASE_TAG} ---"
 git clone --quiet --depth 1 --branch "$RELEASE_TAG" "$PRIVATE_REPO_URL" "$PRIVATE"
 
 # 2. Stage files per .publish-include (faithful port of the workflow's bash).
+#    Every entry is expanded with `git ls-files` instead of a filesystem glob,
+#    so ONLY git-tracked files can ever be staged. Untracked runtime secrets and
+#    PII that live under published directories (.env, vouch/config, ssl/*.pem,
+#    dumpdata/*.json) are therefore unpublishable by construction, not merely
+#    absent because CI happens to check out tracked files only.
 echo "--- Staging files from .publish-include ---"
 mkdir -p "$STAGING"
+STAGED_LIST="$WORK/staged-files.z"   # NUL-separated, staging-relative paths
+: > "$STAGED_LIST"
+UNMATCHED=0
+
+# stage_tracked <src-path-in-private> <dest-path-in-staging>
+stage_tracked() {
+  mkdir -p "$STAGING/$(dirname "$2")"
+  cp "$PRIVATE/$1" "$STAGING/$2"
+  printf '%s\0' "$2" >> "$STAGED_LIST"
+}
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="$(echo "$line" | xargs)"
   [[ -z "$line" || "$line" == \#* ]] && continue
 
   if [[ "$line" == *":"* ]]; then                  # src:dest rename
     src="${line%%:*}"; dest="${line##*:}"
-    if [[ -f "$PRIVATE/$src" ]]; then
-      mkdir -p "$STAGING/$(dirname "$dest")"
-      cp "$PRIVATE/$src" "$STAGING/$dest"
+    if git -C "$PRIVATE" ls-files --error-unmatch -- "$src" >/dev/null 2>&1; then
+      stage_tracked "$src" "$dest"
       echo "Copied (renamed): $src -> $dest"
     else
-      echo "WARNING: Source file not found: $src"
+      echo "WARNING: Source file is not tracked by git, skipped: $src" >&2
+      UNMATCHED=$((UNMATCHED + 1))
     fi
-  elif [[ "$line" == */ ]]; then                   # directory entry
-    if [[ -d "$PRIVATE/$line" ]]; then
-      mkdir -p "$STAGING/$line"
-      cp -r "$PRIVATE/$line"* "$STAGING/$line" 2>/dev/null || true
-      echo "Copied directory: $line"
-    else
-      echo "WARNING: Directory not found: $line"
-    fi
-  else                                             # single file
-    if [[ -f "$PRIVATE/$line" ]]; then
-      mkdir -p "$STAGING/$(dirname "$line")"
-      cp "$PRIVATE/$line" "$STAGING/$line"
+  else                                             # directory or single file
+    matched=0
+    while IFS= read -r -d '' f; do
+      stage_tracked "$f" "$f"
+      matched=$((matched + 1))
+    done < <(git -C "$PRIVATE" ls-files -z -- "$line")
+
+    if [[ "$matched" -eq 0 ]]; then
+      echo "WARNING: No tracked files match .publish-include entry: $line" >&2
+      UNMATCHED=$((UNMATCHED + 1))
+    elif [[ "$line" == */ ]]; then                 # directory entry
+      echo "Copied directory: $line (${matched} tracked files)"
+    else                                           # single file
       echo "Copied file: $line"
-    else
-      echo "WARNING: File not found: $line"
     fi
   fi
 done < "$PRIVATE/.publish-include"
+
+# Fail rather than shipping a partial mirror -- see the matching comment in
+# .github/workflows/publish-to-public.yml.
+if [[ "$UNMATCHED" -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${UNMATCHED} .publish-include entries matched no tracked files (see above)." >&2
+  echo "       Refusing to publish a partial mirror. Fix .publish-include and re-run." >&2
+  exit 1
+fi
 
 echo
 echo "=== Staged files ==="
@@ -135,8 +160,16 @@ find "$PUBLIC" -mindepth 1 -not -path "$PUBLIC/.git/*" -not -name '.git' | sort
 
 # 5. Commit + tag.
 cd "$PUBLIC"
-# -f so the published .gitignore cannot suppress manifest-selected files.
-git add -A -f
+git add -A
+# Then force-add exactly the staged list — nothing else. That list came from
+# `git ls-files` in the private repo, so this cannot pull in an untracked file;
+# it only stops the published .gitignore from suppressing tracked placeholders
+# under ignored runtime dirs (static/.gitkeep, media/.gitkeep,
+# vouch/config.template). A blanket `git add -A -f` would also have force-added
+# anything else that happened to be on disk.
+if [[ -s "$STAGED_LIST" ]]; then
+  xargs -0 git add -f -- < "$STAGED_LIST"
+fi
 if git diff --cached --quiet; then
   echo
   echo "No changes to publish. Nothing to do."

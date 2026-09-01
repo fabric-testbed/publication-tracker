@@ -8,6 +8,8 @@
 # .claude/commands/ is shared and stays tracked; only local settings are ignored.
 /.codex/
 /.claude/settings.local.json
+# Agent worktrees are local scratch checkouts -- never commit them.
+/.claude/worktrees/
 
 # local self-signed ssl certs
 /ssl/*.pem
@@ -27,7 +29,9 @@
 
 # local fixture files
 /dumpdata/*.json
-/publicationtrkr/apps/pubsimple/fixtures/*.json
+# Local fixture dumps contain real user records -- names, institutional email
+# addresses and CILogon subject identifiers. Never commit them.
+/publicationtrkr/apps/apiuser/fixtures/*.json
 
 # migration files are tracked deliberately -- see AGENTS.md / run_server.sh.
 # They used to be ignored and regenerated at container start, which meant the

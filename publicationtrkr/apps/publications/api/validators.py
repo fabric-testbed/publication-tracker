@@ -1,8 +1,26 @@
 import os
 
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
+
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
 from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
+
+
+def is_http_url(link: str) -> bool:
+    """
+    Return True when link is a well formed http:// or https:// URL.
+
+    Any other scheme - notably 'javascript:' - is rejected: link is rendered
+    into an href attribute, where an active scheme runs script in the page
+    origin regardless of target="_blank".
+    """
+    try:
+        URLValidator(schemes=['http', 'https'])(str(link).strip())
+    except ValidationError:
+        return False
+    return True
 
 
 def validate_publication_create(request, api_user: ApiUser) -> tuple:
@@ -29,8 +47,12 @@ def validate_publication_create(request, api_user: ApiUser) -> tuple:
         authors = request_data.get('authors', [])
         if authors == [] and not bibtex_data.get('authors'):
             message.append({'authors': 'must provide at least one author'})
-        # 'link': 'string' - optional
+        # 'link': 'string' - optional (check request data and bibtex)
         link = request_data.get('link', None)
+        if not link:
+            link = bibtex_data.get('link', None)
+        if link and not is_http_url(link):
+            message.append({'link': 'must be an http:// or https:// URL'})
         # 'project_name': 'string' - optional
         project_name = request_data.get('project_name', None)
         # 'project_uuid': 'string' - optional
@@ -88,8 +110,14 @@ def validate_publication_update(request, api_user: ApiUser) -> tuple:
         authors = request_data.get('authors', None)
         if authors == []:
             message.append({'authors': 'must provide at least one author'})
-        # 'link': 'string' - optional
+        # 'link': 'string' - optional (check request data and bibtex)
         link = request_data.get('link', None)
+        if not link:
+            bibtex = request_data.get('bibtex', None)
+            if bibtex:
+                link = parse_bibtex(bibtex).get('link', None)
+        if link and not is_http_url(link):
+            message.append({'link': 'must be an http:// or https:// URL'})
         # 'project_name': 'string' - optional
         project_name = request_data.get('project_name', None)
         # 'project_uuid': 'string' - optional

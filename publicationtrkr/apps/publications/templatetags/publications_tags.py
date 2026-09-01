@@ -51,6 +51,23 @@ def publication_title_from_uuid(publication_uuid: str) -> str:
 
 
 @register.filter
+def safe_external_url(link: str) -> str:
+    """
+    Return link only when it is an http:// or https:// URL, otherwise ''.
+
+    Guards href attributes against active URI schemes such as 'javascript:',
+    which execute in the page origin regardless of target="_blank".  Values
+    stored before scheme validation was added are neutralized at render time.
+    """
+    if not link:
+        return ''
+    link = str(link).strip()
+    if link.lower().startswith('http://') or link.lower().startswith('https://'):
+        return link
+    return ''
+
+
+@register.filter
 def project_url_from_uuid(project_uuid: str) -> Union[None, str]:
     if len(project_uuid) > 0:
         try:

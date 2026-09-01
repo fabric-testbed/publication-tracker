@@ -56,16 +56,20 @@ class PublicationSerializer(serializers.ModelSerializer):
         return str(self.created.isoformat(' '))
 
     @staticmethod
-    def get_created_by(self) -> str:
-        return str(self.created_by.uuid)
+    def get_created_by(self) -> str | None:
+        # created_by is on_delete=SET_NULL. Without this guard a single row whose
+        # creator was removed raises AttributeError inside ListSerializer, which
+        # takes down the whole page -- /api/publications, /publications/,
+        # by-author-uuid and by-project-uuid all 500, not just the affected record.
+        return str(self.created_by.uuid) if self.created_by else None
 
     @staticmethod
     def get_modified(self) -> str:
         return str(self.modified.isoformat(' '))
 
     @staticmethod
-    def get_modified_by(self) -> str:
-        return str(self.modified_by.uuid)
+    def get_modified_by(self) -> str | None:
+        return str(self.modified_by.uuid) if self.modified_by else None
 
 
 class PublicationCreateSerializer(serializers.ModelSerializer):

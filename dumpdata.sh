@@ -23,7 +23,6 @@ fi
 # All apps that contain data models — order matters for foreign key dependencies
 APPS_LIST=(
     "apiuser"
-    "pubsimple"
     "publications"
 )
 

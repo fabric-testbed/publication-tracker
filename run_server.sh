@@ -57,7 +57,6 @@ if [[ "${LOAD_FIXTURES:-0}" -eq 1 ]]; then
     FIXTURES_LIST=(
         "apiuser"
         "publications"
-        "pubsimple"
     )
 else
     echo "### LOAD_FIXTURES = False ###"

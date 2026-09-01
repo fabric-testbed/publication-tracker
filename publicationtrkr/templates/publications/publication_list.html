@@ -62,8 +62,8 @@
                            title="View full details for this publication">
                             {{ pub.title }}
                         </a>
-                        {% if pub.link %}
-                            <a href="{{ pub.link }}" target="_blank" rel="noopener"
+                        {% if pub.link|safe_external_url %}
+                            <a href="{{ pub.link|safe_external_url }}" target="_blank" rel="noopener"
                                class="pub-source-link ms-1"
                                title="Open the original publication source in a new tab"
                                data-bs-toggle="tooltip" data-bs-placement="right">

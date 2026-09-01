@@ -60,6 +60,21 @@ def apiuser_list(request):
 
 def apiuser_detail(request, *args, **kwargs):
     api_user = get_api_user(request=request)
+    # Enforce the admin gate in the view, not only in the template. apiuser_detail.html
+    # hides the record behind {% if %}, but the record was fetched and passed into the
+    # context regardless -- one template edit away from disclosing another user's email,
+    # cilogon_id, roles and project membership. apiuser_list already gates in the view;
+    # this matches it.
+    if not api_user.is_publication_tracker_admin:
+        return render(request,
+                      'apiuser/apiuser_detail.html',
+                      {
+                          'api_user': api_user.as_dict(),
+                          'apiuser': None,
+                          'message': 'PermissionDenied: you do not have permission to '
+                                     'view API users.',
+                          'debug': API_DEBUG,
+                      })
     apiuser = get_object_or_404(ApiUser, uuid=kwargs.get('uuid'))
     return render(request,
                   'apiuser/apiuser_detail.html',
