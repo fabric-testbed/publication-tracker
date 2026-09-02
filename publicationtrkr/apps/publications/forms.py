@@ -6,6 +6,7 @@ from django.forms import CheckboxSelectMultiple
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
+from publicationtrkr.apps.publications.utils.publication_builder import resolve_create_fields
 
 
 class PublicationForm(forms.ModelForm):
@@ -82,47 +83,46 @@ class PublicationForm(forms.ModelForm):
 
         # parse bibtex if provided
         bibtex_string = cleaned_data.get('bibtex', '')
-        bibtex_data = {}
-        if bibtex_string:
-            bibtex_data = parse_bibtex(bibtex_string)
+        bibtex_data = parse_bibtex(bibtex_string) if bibtex_string else {}
 
-        # resolve authors: manual input overrides bibtex
-        authors_raw = cleaned_data.get('authors', '').strip()
-        if authors_raw:
-            cleaned_data['authors'] = [a.strip() for a in authors_raw.split(',') if a.strip()]
-        elif bibtex_data.get('authors'):
-            cleaned_data['authors'] = bibtex_data['authors']
+        # The form's own input shape: authors arrive as one comma-separated string,
+        # and every text field is stripped before it is compared with the BibTeX
+        # default. Everything after that is the shared "manual overrides BibTeX"
+        # merge, so the form and the API cannot drift again.
+        manual = {name: value.strip() if isinstance(value, str) else value
+                  for name, value in cleaned_data.items()}
+        authors_raw = manual.get('authors', '')
+        manual['authors'] = [a.strip() for a in authors_raw.split(',') if a.strip()] if authors_raw else []
+
+        resolved = resolve_create_fields(manual, bibtex_data)
+
+        # Only the fields this form is responsible for are written back. venue and
+        # the project fields pass through untouched: the form validates nothing
+        # about them, and the API layer resolves them from the same BibTeX.
+        if resolved['authors']:
+            cleaned_data['authors'] = resolved['authors']
         else:
             self.add_error(None, 'Authors: must provide at least one author directly or via BibTeX.')
 
-        # resolve title: manual input overrides bibtex
-        title = cleaned_data.get('title', '').strip()
-        if title:
-            cleaned_data['title'] = title
-        elif bibtex_data.get('title'):
-            cleaned_data['title'] = bibtex_data['title']
+        if resolved['title']:
+            cleaned_data['title'] = resolved['title']
         else:
             self.add_error(None, 'Title: must provide a title directly or via BibTeX.')
 
-        # resolve link: manual input overrides bibtex, http(s) schemes only
-        link = cleaned_data.get('link', '').strip()
-        if not link and bibtex_data.get('link'):
-            link = str(bibtex_data['link']).strip()
+        # link is http(s) only -- it is rendered into an href, where 'javascript:'
+        # would run in the page origin.
+        link = resolved['link']
         if link:
             try:
-                URLValidator(schemes=['http', 'https'])(link)
-                cleaned_data['link'] = link
+                URLValidator(schemes=['http', 'https'])(str(link).strip())
+                cleaned_data['link'] = str(link).strip()
             except ValidationError:
                 self.add_error(None, 'Link: must be a valid http:// or https:// URL.')
         else:
             cleaned_data['link'] = ''
 
-        # resolve year: manual input overrides bibtex
-        year = cleaned_data.get('year', '').strip()
-        if year:
-            cleaned_data['year'] = year
-        elif bibtex_data.get('year'):
-            cleaned_data['year'] = bibtex_data['year']
+        if resolved['year']:
+            cleaned_data['year'] = resolved['year']
         else:
             self.add_error(None, 'Year: must provide a year directly or via BibTeX.')
 

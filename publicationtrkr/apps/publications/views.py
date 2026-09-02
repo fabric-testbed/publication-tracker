@@ -1,6 +1,7 @@
 import json
 from urllib.parse import parse_qs, urlparse
 
+from django.conf import settings
 from django.core.paginator import Paginator
 from django.db import models
 from django.db.models import Count, Q
@@ -106,6 +107,47 @@ def publication_create(request):
                       'form': form,
                       'message': message,
                       'api_user': api_user.as_dict(),
+                  })
+
+
+def publication_bulk_upload(request):
+    """
+    Admin-only bulk upload page.
+
+    Posts here rather than to /api/publications/bulk on purpose. A multipart POST to
+    /api/ is refused without an X-Requested-With header (server/middleware.py), and
+    this page has something better available to it: it is a same-origin Django form,
+    so {% csrf_token %} and CsrfViewMiddleware already apply. The viewset action is
+    then called in process, the same way publication_create does.
+    """
+    api_user = get_api_user(request=request)
+    message = None
+    summary = None
+    if request.method == 'POST':
+        if not api_user.is_publication_tracker_admin:
+            message = 'PermissionDenied: you do not have permission to bulk upload publications.'
+        elif not request.FILES.get('file', None):
+            message = 'Choose a .jsonl or .bib file to upload.'
+        else:
+            try:
+                # The action reads request.FILES; there is no JSON body on this path.
+                request.data = {}
+                response = PublicationViewSet(request=request).bulk(request=request)
+                if response.status_code == status.HTTP_200_OK:
+                    summary = response.data
+                else:
+                    message = str(response.data)
+            except Exception as exc:
+                message = str(exc)
+    return render(request,
+                  'publication_bulk_upload.html',
+                  {
+                      'api_user': api_user.as_dict(),
+                      'message': message,
+                      'summary': summary,
+                      'max_records': settings.BULK_MAX_RECORDS,
+                      'max_upload_mb': settings.BULK_MAX_UPLOAD_BYTES // (1024 * 1024),
+                      'debug': API_DEBUG,
                   })
 
 

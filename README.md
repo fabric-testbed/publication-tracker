@@ -518,6 +518,7 @@ DRF's browsable-API login at `/api-auth/login/` has been removed and returns `40
 |---|---|---|
 | `GET` | `/api/publications` | List publications (paginated) |
 | `POST` | `/api/publications` | Create a publication |
+| `POST` | `/api/publications/bulk` | Create many publications from one document (admin only) |
 | `GET` | `/api/publications/<uuid>` | Get a publication |
 | `PUT` | `/api/publications/<uuid>` | Update a publication |
 | `DELETE` | `/api/publications/<uuid>` | Delete a publication |
@@ -579,7 +580,51 @@ curl -X POST "https://<host>:8443/api/publications" \
     "project_name": "My FABRIC Project",
     "project_uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   }'
+
+# Bulk create from a JSON body (publication-tracker admins only)
+curl -X POST "https://<host>:8443/api/publications/bulk" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"publications": [
+    {"title": "First Paper", "authors": ["Smith, Jane"], "year": "2024"},
+    {"title": "Second Paper", "authors": ["Doe, John"], "year": "2025"}
+  ]}'
+
+# Bulk create from a file: .jsonl (one object per line) or .bib (BibTeX).
+# A multipart body under /api/ requires the X-Requested-With header.
+curl -X POST "https://<host>:8443/api/publications/bulk" \
+  -H "Authorization: Bearer <token>" \
+  -H "X-Requested-With: XMLHttpRequest" \
+  -F "file=@publications.bib"
 ```
+
+**Bulk response schema:**
+
+Every record is reported on by position, so a partial success can be acted on. `index`
+is the position in the submitted document; a `.jsonl` upload also reports `line`, the
+1-based file line. Records are created one at a time in their own transactions, so a
+record whose title and link already exist is `skipped` and the rest of the batch still
+lands.
+
+```json
+{
+  "total": 3,
+  "created": 1,
+  "skipped": 1,
+  "failed": 1,
+  "results": [
+    {"index": 0, "status": "created", "uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"},
+    {"index": 1, "status": "skipped", "reason": "duplicate key value violates unique constraint ..."},
+    {"index": 2, "status": "failed", "errors": [{"year": "must provide a year"}]}
+  ]
+}
+```
+
+Limits: `BULK_MAX_RECORDS` records (default 1000) and `BULK_MAX_UPLOAD_BYTES` bytes
+(default 10 MB) per request, both enforced before anything is written, and the `bulk`
+throttle scope (`THROTTLE_BULK`, default `6/hour`). Admins can also use the
+`/publications/bulk-upload` page, which posts the same file through a CSRF-protected
+Django form.
 
 **Publication response schema:**
 

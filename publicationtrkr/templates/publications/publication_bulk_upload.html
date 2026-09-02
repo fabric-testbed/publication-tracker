@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% load static django_bootstrap5 %}
+
+{% block title %}
+    Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    {% if api_user.is_authenticated %}
+        {% if api_user.is_publication_tracker_admin %}
+            <div class="container w-85">
+                <div class="page-header">
+                    <h3>Bulk Upload</h3>
+                    <span class="subtitle">Create many publications from one file</span>
+                </div>
+                <div class="form-card">
+                    <form id="form" method="POST" enctype="multipart/form-data" class="form-group">
+                        {% csrf_token %}
+                        <p>
+                            <label for="file" class="required">File *</label>
+                            <input type="file" name="file" id="file" accept=".jsonl,.ndjson,.bib,.bibtex" required>
+                            <small class="text-muted d-block">
+                                A <code>.jsonl</code> file with one publication object per line, or a
+                                <code>.bib</code> file parsed as BibTeX. Up to {{ max_records }} records
+                                and {{ max_upload_mb }} MB per upload.
+                            </small>
+                        </p>
+                        <hr class="form-divider">
+                        <p class="mb-0">
+                            <small class="text-muted">
+                                Each record is created on its own. A record whose title and link already
+                                exist is skipped, not overwritten, so re-uploading a file that overlaps
+                                what is already stored adds only what is new.
+                            </small>
+                        </p>
+                    </form>
+                </div>
+                <div class="action-row">
+                    <button class="btn btn-success btn-fabric" type="submit" form="form" name="upload"
+                            title="Upload this file"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-upload me-1"></i> Upload
+                    </button>
+                    <a href="{% url 'publication_list' %}" class="btn btn-secondary btn-fabric"
+                       title="Return to the publications list"
+                       data-bs-toggle="tooltip" data-bs-placement="bottom">
+                        <i class="fa fa-arrow-left me-1"></i> Back
+                    </a>
+                </div>
+
+                {% if summary %}
+                    <div class="page-header mt-4">
+                        <h4>Result</h4>
+                        <span class="subtitle">
+                            {{ summary.created }} created, {{ summary.skipped }} skipped,
+                            {{ summary.failed }} failed, of {{ summary.total }} record(s)
+                        </span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Position</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Detail</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for result in summary.results %}
+                                    <tr>
+                                        <td>
+                                            {% if result.line %}line {{ result.line }}
+                                            {% elif result.index is not None %}entry {{ result.index }}
+                                            {% else %}&mdash;{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if result.status == 'created' %}
+                                                <span class="badge bg-success">created</span>
+                                            {% elif result.status == 'skipped' %}
+                                                <span class="badge bg-secondary">skipped</span>
+                                            {% else %}
+                                                <span class="badge bg-danger">failed</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if result.uuid %}
+                                                <a href="{% url 'publication_detail' uuid=result.uuid %}">{{ result.uuid }}</a>
+                                            {% elif result.reason %}
+                                                {{ result.reason }}
+                                            {% else %}
+                                                {% for error in result.errors %}
+                                                    {% for field, detail in error.items %}
+                                                        <div><strong>{{ field }}</strong>: {{ detail }}</div>
+                                                    {% endfor %}
+                                                {% endfor %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+            </div>
+        {% else %}
+            <div class="alert alert-warning d-flex align-items-center" role="alert">
+                <i class="fa fa-triangle-exclamation me-2"></i>
+                You are not able to bulk upload publications.
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="alert alert-warning d-flex align-items-center" role="alert">
+            <i class="fa fa-triangle-exclamation me-2"></i>
+            You are not logged in. Please login first to bulk upload publications.
+        </div>
+        <a href="/login" class="btn btn-success btn-fabric"
+           title="Log in with your FABRIC identity"
+           data-bs-toggle="tooltip" data-bs-placement="right">
+            <i class="fa fa-right-to-bracket me-1"></i> Login
+        </a>
+    {% endif %}
+    {% if debug %}
+        <hr>
+        <pre><strong>summary</strong>:<br>{{ summary|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

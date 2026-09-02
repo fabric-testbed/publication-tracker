@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
-from uuid import uuid4, UUID
+from uuid import UUID
 import os
 
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import filters, permissions, viewsets
 from rest_framework.decorators import action
@@ -13,7 +13,16 @@ from rest_framework.response import Response
 from publicationtrkr.apps.publications.api.serializers import AuthorSerializer, PublicationSerializer, PublicationCreateSerializer
 from publicationtrkr.apps.publications.api.validators import validate_publication_create, validate_publication_update
 from publicationtrkr.apps.publications.models import Author, Publication
-from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex, generate_bibtex
+from publicationtrkr.apps.publications.utils.bibtex_utils import generate_bibtex
+from publicationtrkr.apps.publications.utils.bulk_ingest import (
+    BulkIngestError,
+    collect_records,
+    ingest,
+)
+from publicationtrkr.apps.publications.utils.publication_builder import (
+    create_publication,
+    update_publication,
+)
 from publicationtrkr.utils.fabric_auth import get_api_user, is_valid_uuid
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
@@ -96,6 +105,11 @@ class PublicationViewSet(viewsets.ModelViewSet):
     default_serializer_class = PublicationSerializer
     queryset = Publication.objects.all().order_by('title')
     permission_classes = [permissions.AllowAny]
+    # ScopedRateThrottle is in DEFAULT_THROTTLE_CLASSES and reads this attribute; a
+    # falsy scope means "not throttled by scope", so every action except bulk() is
+    # left to AnonRateThrottle. It has to exist on the class for @action to be allowed
+    # to override it per action.
+    throttle_scope = None
     filter_backends = [DynamicSearchFilter]
     lookup_field = 'uuid'
 
@@ -157,94 +171,23 @@ class PublicationViewSet(viewsets.ModelViewSet):
         - year
         """
         api_user = get_api_user(request=request)
-        if api_user.can_create_publication or api_user.is_publication_tracker_admin:
-            is_valid, message = validate_publication_create(request, api_user=api_user)
-            if is_valid:
-                try:
-                    now = datetime.now(timezone.utc)
-                    request_data = request.data
-                    # parse bibtex if provided (used as defaults)
-                    bibtex_string = request_data.get('bibtex', None)
-                    bibtex_data = {}
-                    if bibtex_string:
-                        bibtex_data = parse_bibtex(bibtex_string)
-                    publication = Publication()
-                    # authors (manual overrides bibtex)
-                    authors = request_data.get('authors', [])
-                    authors_list = authors if authors else bibtex_data.get('authors', [])
-                    # bibtex
-                    if bibtex_string and bibtex_string not in ['', ""]:
-                        publication.bibtex = bibtex_string
-                    # created
-                    publication.created = now
-                    # created_by
-                    publication.created_by = api_user
-                    # link (manual overrides bibtex)
-                    link = request_data.get('link', None)
-                    if link in ['', "", None]:
-                        link = bibtex_data.get('link', None)
-                    if link in ['', "", None]:
-                        publication.link = None
-                    else:
-                        publication.link = link
-                    # modified
-                    publication.modified = now
-                    # modified_by
-                    publication.modified_by = api_user
-                    # project_name
-                    project_name = request_data.get('project_name', None)
-                    if project_name in ['', "", None]:
-                        publication.project_name = None
-                    else:
-                        publication.project_name = project_name
-                    # project_uuid
-                    project_uuid = request_data.get('project_uuid', None)
-                    if project_uuid in ['', "", None]:
-                        publication.project_uuid = None
-                    else:
-                        publication.project_uuid = project_uuid
-                    # get project_name if not provided and project_uuid is given
-                    if publication.project_uuid and not publication.project_name:
-                        publication.project_name = get_project_name_from_uuid(request, publication.project_uuid, api_user)
-                    # title (manual overrides bibtex)
-                    title = request_data.get('title', None)
-                    publication.title = title if title else bibtex_data.get('title', None)
-                    # uuid
-                    publication.uuid = str(uuid4())
-                    # create Author objects for each author name
-                    author_uuids = []
-                    for author_name in authors_list:
-                        author = Author()
-                        author.author_name = author_name
-                        author.display_name = author_name
-                        author.fabric_uuid = None
-                        author.publication_uuid = publication.uuid
-                        author.uuid = str(uuid4())
-                        author.save()
-                        author_uuids.append(author.uuid)
-                    publication.authors = author_uuids
-                    # venue (manual overrides bibtex)
-                    venue = request_data.get('venue', None)
-                    if venue in ['', "", None]:
-                        venue = bibtex_data.get('venue', None)
-                    if venue in ['', "", None]:
-                        publication.venue = None
-                    else:
-                        publication.venue = venue
-                    # year (manual overrides bibtex)
-                    year = request_data.get('year', None)
-                    publication.year = year if year else bibtex_data.get('year', None)
-                    # save to db
-                    publication.save()
-                    # return new publication
-                    return Response(data=PublicationSerializer(instance=publication).data, status=201)
-                except Exception as exc:
-                    return Response(data={'UniqueConstraint': str(exc)}, status=400)
-            else:
-                raise ValidationError(detail={'ValidationError': message})
-        else:
+        if not (api_user.can_create_publication or api_user.is_publication_tracker_admin):
             raise PermissionDenied(
                 detail="PermissionDenied: user:'{0}' is unable to create /publications".format(api_user.uuid))
+        is_valid, message = validate_publication_create(request, api_user=api_user)
+        if not is_valid:
+            raise ValidationError(detail={'ValidationError': message})
+        try:
+            publication = create_publication(
+                data=request.data,
+                api_user=api_user,
+                resolve_project_name=memoized_project_name_resolver(request, api_user),
+            )
+        except Exception as exc:
+            # Chiefly the unique constraint on title/link. The builder runs the whole
+            # save in a transaction, so there are no half-written Author rows here.
+            return Response(data={'UniqueConstraint': str(exc)}, status=400)
+        return Response(data=PublicationSerializer(instance=publication).data, status=201)
 
     def retrieve(self, request, *args, **kwargs):
         """
@@ -270,115 +213,20 @@ class PublicationViewSet(viewsets.ModelViewSet):
             publication_uuid = kwargs.get('uuid')
         publication = get_object_or_404(Publication, uuid=publication_uuid)
         api_user = get_api_user(request=request)
-        if is_publication_owner(api_user, publication) or api_user.is_publication_tracker_admin:
-            is_valid, message = validate_publication_update(request, api_user=api_user)
-            if is_valid:
-                now = datetime.now(timezone.utc)
-                request_data = request.data
-                # parse bibtex if provided (used as defaults for fields not explicitly given)
-                bibtex_string = request_data.get('bibtex', None)
-                bibtex_data = {}
-                if bibtex_string:
-                    bibtex_data = parse_bibtex(bibtex_string)
-                # bibtex
-                if bibtex_string and bibtex_string not in ['', ""]:
-                    publication.bibtex = bibtex_string
-                # authors (manual overrides bibtex)
-                authors_list = None
-                if request_data.get('authors', None):
-                    authors_list = request_data.get('authors', [])
-                elif bibtex_data.get('authors'):
-                    authors_list = bibtex_data.get('authors')
-                if authors_list is not None:
-                    # Preserve existing Author records where possible (keeps
-                    # display_name, fabric_uuid, and uuid stable).  Match by
-                    # position in the Publication.authors array.
-                    existing_uuids = list(publication.authors)
-                    new_author_uuids = []
-                    for i, author_name in enumerate(authors_list):
-                        if i < len(existing_uuids):
-                            # Update existing Author in place
-                            try:
-                                author = Author.objects.get(uuid=existing_uuids[i])
-                                if author.author_name != author_name:
-                                    author.author_name = author_name
-                                    author.save(update_fields=['author_name'])
-                                new_author_uuids.append(author.uuid)
-                                continue
-                            except Author.DoesNotExist:
-                                pass
-                        # New author or missing record — create fresh
-                        author = Author()
-                        author.author_name = author_name
-                        author.display_name = author_name
-                        author.fabric_uuid = None
-                        author.publication_uuid = publication.uuid
-                        author.uuid = str(uuid4())
-                        author.save()
-                        new_author_uuids.append(author.uuid)
-                    # Remove any leftover Authors beyond the new list length
-                    for old_uuid in existing_uuids[len(authors_list):]:
-                        Author.objects.filter(uuid=old_uuid).delete()
-                    publication.authors = new_author_uuids
-                # link (manual overrides bibtex)
-                if request_data.get('link', None):
-                    link = request_data.get('link')
-                    if link in ['', ""]:
-                        publication.link = None
-                    else:
-                        publication.link = link
-                elif bibtex_data.get('link'):
-                    publication.link = bibtex_data.get('link')
-                # modified
-                publication.modified = now
-                # modified_by
-                publication.modified_by = api_user
-                # project_name
-                if request_data.get('project_name', None):
-                    project_name = request_data.get('project_name')
-                    if project_name in ['', ""]:
-                        publication.project_name = None
-                    else:
-                        publication.project_name = project_name
-                # project_uuid
-                if request_data.get('project_uuid', None):
-                    project_uuid = request_data.get('project_uuid')
-                    if project_uuid in ['', ""]:
-                        publication.project_uuid = None
-                    else:
-                        publication.project_uuid = project_uuid
-                # get project_name if not provided and project_uuid is given
-                if publication.project_uuid and not publication.project_name:
-                    publication.project_name = get_project_name_from_uuid(request, publication.project_uuid, api_user)
-                # title (manual overrides bibtex)
-                if request_data.get('title', None):
-                    publication.title = request_data.get('title', None)
-                elif bibtex_data.get('title'):
-                    publication.title = bibtex_data.get('title')
-                # venue (manual overrides bibtex)
-                if request_data.get('venue', None):
-                    venue = request_data.get('venue')
-                    if venue in ['', ""]:
-                        publication.venue = None
-                    else:
-                        publication.venue = venue
-                elif bibtex_data.get('venue'):
-                    publication.venue = bibtex_data.get('venue')
-                # year (manual overrides bibtex)
-                if request_data.get('year', None):
-                    publication.year = request_data.get('year', None)
-                elif bibtex_data.get('year'):
-                    publication.year = bibtex_data.get('year')
-                # save publication
-                publication.save()
-                # return updated publication
-                return Response(data=PublicationSerializer(instance=publication).data, status=200)
-            else:
-                raise ValidationError(detail={'ValidationError': message})
-        else:
+        if not (is_publication_owner(api_user, publication) or api_user.is_publication_tracker_admin):
             raise PermissionDenied(
-                detail="PermissionDenied: user:'{0}' is unable to update /publications/{1}".format(api_user.uuid,
-                                                                                                   kwargs.get('uuid')))
+                detail="PermissionDenied: user:'{0}' is unable to update /publications/{1}".format(
+                    api_user.uuid, kwargs.get('uuid')))
+        is_valid, message = validate_publication_update(request, api_user=api_user)
+        if not is_valid:
+            raise ValidationError(detail={'ValidationError': message})
+        publication = update_publication(
+            publication=publication,
+            data=request.data,
+            api_user=api_user,
+            resolve_project_name=memoized_project_name_resolver(request, api_user),
+        )
+        return Response(data=PublicationSerializer(instance=publication).data, status=200)
 
     def partial_update(self, request, *args, **kwargs):
         """
@@ -403,6 +251,59 @@ class PublicationViewSet(viewsets.ModelViewSet):
             raise PermissionDenied(
                 detail="PermissionDenied: user:'{0}' is unable to delete /publications/{1}".format(api_user.uuid,
                                                                                                    kwargs.get('uuid')))
+
+    @extend_schema(
+        summary='Bulk create publications',
+        description=(
+            'Create many publications in one request. Admin only.\n\n'
+            'Send either a JSON body -- a list of publication objects, or an object '
+            "with a 'publications' list -- or a multipart upload named 'file' holding "
+            'a .jsonl document (one publication object per line) or a .bib document '
+            '(parsed as BibTeX, one publication per entry).\n\n'
+            'Every record is reported on by position. For a .jsonl upload each result '
+            'also carries the 1-based file line, which is the number to fix. Records '
+            'are created one at a time in their own transactions, so a duplicate is '
+            "reported as 'skipped' and the rest of the batch still lands.\n\n"
+            'A multipart upload must carry an X-Requested-With header: unsafe requests '
+            'under /api/ with a form-encoded, multipart or text/plain body are refused '
+            'without one. A JSON body needs no such header.'
+        ),
+        request=OpenApiTypes.OBJECT,
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+        },
+    )
+    @action(detail=False, methods=['post'], url_path='bulk',
+            permission_classes=[IsPublicationTrackerAdminOrReadOnly],
+            throttle_scope='bulk')
+    def bulk(self, request, *args, **kwargs):
+        """
+        POST /api/publications/bulk
+        """
+        api_user = get_api_user(request=request)
+        # permission_classes covers the HTTP path. This covers the other one: the
+        # bulk-upload page calls this method in process (publications/views.py), which
+        # never reaches DRF dispatch and so never runs a permission class.
+        if not api_user.is_publication_tracker_admin:
+            raise PermissionDenied(
+                detail="PermissionDenied: user:'{0}' is unable to bulk create /publications".format(
+                    api_user.uuid))
+        try:
+            records, failures = collect_records(
+                data=getattr(request, 'data', None),
+                upload=getattr(request, 'FILES', {}).get('file', None),
+            )
+        except BulkIngestError as exc:
+            # Nothing was written: the caps are checked before any database work.
+            return Response(data={'BulkIngestError': str(exc)}, status=400)
+        summary = ingest(
+            records, failures,
+            api_user=api_user,
+            resolve_project_name=memoized_project_name_resolver(request, api_user),
+        )
+        return Response(data=summary, status=200)
 
     @action(detail=True, methods=['get'], url_path='bibtex')
     def bibtex(self, request, uuid=None):
@@ -551,3 +452,24 @@ def get_project_name_from_uuid(request, project_uuid, api_user) -> str:
     else:
         project_name = None
     return project_name
+
+
+def memoized_project_name_resolver(request, api_user):
+    """
+    A callable(project_uuid) -> str|None over get_project_name_from_uuid, caching for
+    the life of one request.
+
+    get_project_name_from_uuid is an uncached core-api round trip. One per request is
+    fine; one per record is not. A 1000-record bulk upload naming a handful of projects
+    would spend 1000 * FABRIC_HTTP_TIMEOUT_SECONDS in the worst case, against an nginx
+    uwsgi_read_timeout measured in seconds -- the memo is what makes the record cap
+    survivable rather than theoretical.
+    """
+    cache = {}
+
+    def resolve(project_uuid):
+        if project_uuid not in cache:
+            cache[project_uuid] = get_project_name_from_uuid(request, project_uuid, api_user)
+        return cache[project_uuid]
+
+    return resolve
