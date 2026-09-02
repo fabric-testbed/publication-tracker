@@ -14,7 +14,7 @@ from publicationtrkr.apps.publications.api.serializers import AuthorSerializer, 
 from publicationtrkr.apps.publications.api.validators import validate_publication_create, validate_publication_update
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex, generate_bibtex
-from publicationtrkr.utils.fabric_auth import get_api_user
+from publicationtrkr.utils.fabric_auth import get_api_user, is_valid_uuid
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
 
@@ -528,6 +528,13 @@ class AuthorViewSet(viewsets.ModelViewSet):
 
 def get_project_name_from_uuid(request, project_uuid, api_user) -> str:
     if project_uuid:
+        # project_uuid is interpolated into the outbound request path below, so it is
+        # checked here as well as in validators.py. The validators run first on the
+        # create and update paths, but this function is the reusable one -- a later
+        # caller that skips them would otherwise reintroduce the same hole.
+        if not is_valid_uuid(project_uuid):
+            print('get_project_name_from_uuid: refusing non-UUID project_uuid')
+            return None
         try:
             if api_user.access_type == ApiUser.COOKIE:
                 fab_project = query_core_api_by_cookie(

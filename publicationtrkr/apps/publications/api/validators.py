@@ -6,6 +6,7 @@ from django.core.validators import URLValidator
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
 from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
+from publicationtrkr.utils.fabric_auth import is_valid_uuid
 
 
 def is_http_url(link: str) -> bool:
@@ -59,7 +60,14 @@ def validate_publication_create(request, api_user: ApiUser) -> tuple:
         project_uuid = request_data.get('project_uuid', None)
         if project_name and not project_uuid:
             message.append({'project_name': 'must also provide a project_uuid when providing a project_name'})
-        if project_uuid:
+        if project_uuid and not is_valid_uuid(project_uuid):
+            # project_uuid is interpolated into an outbound core-api request path below.
+            # Unvalidated, a value like '../people/<uuid>' reaches a different endpoint,
+            # whose 'name' would then be stored as this publication's project_name and
+            # served to anonymous readers. by_project_uuid (viewsets.py) already
+            # validated; create and update did not.
+            message.append({'project_uuid': 'must be a valid UUID'})
+        elif project_uuid:
             # verify project exists - get project_name if not provided in request
             if api_user.access_type == ApiUser.COOKIE:
                 fab_project = query_core_api_by_cookie(
@@ -77,8 +85,7 @@ def validate_publication_create(request, api_user: ApiUser) -> tuple:
         title = request_data.get('title', None)
         if not title and not bibtex_data.get('title'):
             message.append({'title': 'must provide a title'})
-        # 'venue': 'string' - optional
-        venue = request_data.get('venue', None)
+        # 'venue': 'string' - optional, no constraint to check
         # 'year': 'string' - required (check request data and bibtex)
         year = request_data.get('year', None)
         if not year and not bibtex_data.get('year'):
@@ -124,7 +131,11 @@ def validate_publication_update(request, api_user: ApiUser) -> tuple:
         project_uuid = request_data.get('project_uuid', None)
         if project_name and not project_uuid:
             message.append({'project_name': 'must also provide a project_uuid when providing a project_name'})
-        if project_uuid:
+        if project_uuid and not is_valid_uuid(project_uuid):
+            # See validate_publication_create() for why this is checked before the value
+            # reaches an outbound request path.
+            message.append({'project_uuid': 'must be a valid UUID'})
+        elif project_uuid:
             # verify project exists - get project_name if not provided in request
             if api_user.access_type == ApiUser.COOKIE:
                 fab_project = query_core_api_by_cookie(
@@ -138,12 +149,8 @@ def validate_publication_update(request, api_user: ApiUser) -> tuple:
                 message.append({'project_uuid': 'unable to find project: \'{0}\''.format(project_uuid)})
             if project_name and project_name != fab_project.get('results')[0].get('name'):
                 message.append({'project_name': 'does not match name found for project_uuid: \'{0}\''.format(project_uuid)})
-        # 'title': 'string' - optional
-        title = request_data.get('title', None)
-        # 'venue': 'string' - optional
-        venue = request_data.get('venue', None)
-        # 'year': 'string' - optional
-        year = request_data.get('year', None)
+        # 'title', 'venue' and 'year' are optional on update with no constraint to
+        # check, so there is nothing to read here.
     except Exception as exc:
         message.append({'APIException': exc})
     if len(message) > 0:

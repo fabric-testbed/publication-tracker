@@ -14,15 +14,18 @@
 # local self-signed ssl certs
 /ssl/*.pem
 
-# django static and media files
+# django static and media files. The directory contents are ignored, not the directory
+# itself: git does not descend into an excluded directory, so a '!' negation under
+# '/static/' can never re-include anything and the .gitkeep files were only tracked
+# because they predated the rule.
+/static/*
 !/static/.gitkeep
+/media/*
 !/media/.gitkeep
-/static/
-/media/
 
-# vouch
+# vouch -- config holds the CILogon client secret and the JWT signing secret.
+/vouch/*
 !/vouch/config.template
-/vouch/
 
 # local database volume
 /db_data

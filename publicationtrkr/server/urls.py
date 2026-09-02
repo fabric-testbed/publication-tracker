@@ -16,7 +16,6 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from django.views.generic.base import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework import routers
 
@@ -35,7 +34,11 @@ urlpatterns = [
     path('publications/', include('publicationtrkr.apps.publications.urls')),
     path('admin/', admin.site.urls),
     path('api/', include((router.urls, 'publicationtrkr.apps'))),
-    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
+    # 'api-auth/' (DRF's browsable-API login) is deliberately absent: it exposed
+    # unthrottled password authentication on the internet and nothing referenced it.
+    # '/admin/' stays reachable -- no superuser is provisioned by this repo or any
+    # fixture, so there is no account to attack; restricting it by network is recorded
+    # as an accepted residual rather than done here.
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     # Optional UI:
     path('api/swagger/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

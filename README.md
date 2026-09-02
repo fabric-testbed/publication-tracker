@@ -155,6 +155,8 @@ cp env.template .env
 | `FABRIC_CREDENTIAL_MANAGER` | `https://cm.fabric-testbed.net/` | Credential Manager URL |
 | `FABRIC_PORTAL` | `https://portal.fabric-testbed.net` | FABRIC Portal base URL (used for project links) |
 | `FABRIC_CORE_API_TOKEN` | — | Read-only Core API service token used by the user sync. Server-to-server only |
+| `FABRIC_TOKEN_ISSUER` | *(unset)* | Expected `iss` on a FABRIC bearer token. Unset means unchecked; set to `fabric-core-api` once uis issues tokens with it |
+| `FABRIC_TOKEN_AUDIENCE` | *(unset)* | Expected `aud` on a FABRIC bearer token. Empty means the claim is not checked |
 | `FABRIC_HTTP_TIMEOUT_SECONDS` | `10` | Outbound timeout for calls made on the request path |
 | `FABRIC_SYNC_HTTP_TIMEOUT_SECONDS` | `60` | Outbound timeout for the user sync, which runs off the request path |
 | `USER_SYNC_CRON_SCHEDULE` | `0 3 * * *` | Crontab schedule for the `pubtrkr-cron` sidecar |
@@ -165,6 +167,8 @@ cp env.template .env
 |---|---|---|
 | `VOUCH_COOKIE_NAME` | `fabric-service` | Name of the JWT cookie set by Vouch |
 | `VOUCH_JWT_SECRET` | `<secret>` | Shared secret for JWT validation |
+| `VOUCH_JWT_ISSUER` | `Vouch` | Expected `iss` on the Vouch cookie. Vouch Proxy's own default; empty means the claim is not checked |
+| `VOUCH_JWT_AUDIENCE` | *(unset)* | Expected `aud` on the Vouch cookie. Vouch stamps no top-level `aud` by default, so leave it empty unless yours does |
 
 #### Django
 
@@ -184,8 +188,8 @@ cp env.template .env
 | Variable | Default | Description |
 |---|---|---|
 | `POSTGRES_PASSWORD` | `<secret>` | Database password |
-| `POSTGRES_USER` | `postgres` | Database user |
-| `POSTGRES_DB` | `postgres` | Database name |
+| `POSTGRES_USER` | `<fabric_database_user>` | Database user. `env.template` ships a placeholder, not `postgres` |
+| `POSTGRES_DB` | `<fabric_database_name>` | Database name. `env.template` ships a placeholder, not `postgres` |
 | `POSTGRES_HOST` | `database` | Database host (use `database` in Docker) |
 | `POSTGRES_PORT` | `5432` | Database port |
 | `HOST_DB_DATA` | `./db_data` | Host path for persistent database data |
@@ -225,6 +229,9 @@ vouch:
   cookie:
     name: fabric-service   # matches VOUCH_COOKIE_NAME in .env
     domain: 127.0.0.1
+    secure: true           # session JWT is https-only
+    httpOnly: true         # not readable from JavaScript
+    sameSite: lax          # not sent on cross-site subrequests
 
 oauth:
   provider: oidc
@@ -278,6 +285,7 @@ between hosts is environment-driven:
 | Published http/https ports | `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT` (default 8080/8443) |
 | PostgreSQL data directory on the host | `HOST_DB_DATA` |
 | nginx server config | `NGINX_DEFAULT_CONF` -- point it at a copy, e.g. `./nginx/default.prod.conf` |
+| Public hostname nginx answers to | `server_name` inside that copy. The tracked `nginx/default.conf` names only `127.0.0.1` and `localhost`, and a catch-all server returns 444 for every other `Host` |
 | TLS certificate directory | `NGINX_SSL_CERTS_DIR` |
 
 For anything that genuinely cannot be expressed as a variable -- an extra bind
@@ -286,8 +294,10 @@ mount, say -- copy `docker-compose.override.yml.example` to
 Both that file and `nginx/default.prod.conf` are gitignored.
 
 `nginx/default.conf.prod-example` shows how the shipped nginx config differs from a
-production one: no `:8443` suffix (nginx publishes 80/443 directly) and real
-certificate filenames.
+production one: no `:8443` suffix (nginx publishes 80/443 directly), real certificate
+filenames, and the deployment's own `server_name` in place of `<your.fqdn>`. Set that
+last one before starting nginx -- the catch-all server above it answers every
+unmatched `Host` with 444, so a wrong value means the site serves nothing.
 
 Keeping the checkout clean this way means upgrading is `git fetch --tags && git
 checkout <tag>` -- no stashing local edits across the switch, and no silent
@@ -491,6 +501,15 @@ curl -H "Authorization: Bearer <token>" https://<host>:8443/api/publications
 
 Unauthenticated requests are allowed for read operations (GET).
 
+**Writes must not be form-encoded.** `POST`, `PUT`, `PATCH` and `DELETE` under `/api/`
+are rejected with `403` when the body is `application/x-www-form-urlencoded`,
+`multipart/form-data` or `text/plain` and no `X-Requested-With` header is present.
+Those three content types are the ones a browser will send cross-origin with no
+preflight, so they were forgeable against a visitor's Vouch cookie. Sending
+`Content-Type: application/json`, as every example below does, is unaffected.
+
+DRF's browsable-API login at `/api-auth/login/` has been removed and returns `404`.
+
 ### Endpoints
 
 #### Publications — `/api/publications`
@@ -664,6 +683,7 @@ publication-tracker/
     ├── server/
     │   ├── settings.py           # Django settings
     │   ├── urls.py               # Root URL configuration
+    │   ├── middleware.py         # /api/ cross-site write guard
     │   └── wsgi.py
     ├── apps/
     │   ├── apiuser/              # FABRIC identity & role management

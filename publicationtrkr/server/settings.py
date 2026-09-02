@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 import os
-from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from pathlib import Path
 
@@ -44,8 +43,9 @@ else:
     API_DEBUG = False
 
 # Hosts and CORS origins are environment-driven so that no deployment has to
-# edit this file. Both variables are comma-separated and are *added* to the
-# loopback defaults, which are always present.
+# edit this file. Both variables are comma-separated. ALLOWED_HOSTS is always
+# added to the loopback defaults; CORS_ALLOWED_ORIGINS only outside DEBUG -- see
+# below.
 
 
 def _csv_env(name: str) -> list[str]:
@@ -81,14 +81,28 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    # DRF wraps every view in csrf_exempt, so CsrfViewMiddleware above never protects
+    # /api/. This restores the part of that protection a cookie-authenticated API needs.
+    'publicationtrkr.server.middleware.ApiSimpleRequestGuardMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
 ]
 
+# Loopback origins are a development convenience and were permanently in the production
+# allowlist. Combined with the Access-Control-Allow-Credentials header nginx used to set
+# for every origin it answered, that let anything the victim was running locally over
+# https make credentialed cross-origin reads against production. Both halves are fixed:
+# nginx no longer asserts that header, and these entries are conditional on DEBUG.
+#
+# This narrows CSRF_TRUSTED_ORIGINS below by the same two entries. Nothing is lost:
+# Django always trusts a request's own origin, so same-origin form posts -- every POST
+# this application serves -- do not consult that list at all.
+_LOOPBACK_ORIGINS = ['https://127.0.0.1', 'https://localhost'] if DEBUG else []
+
 CORS_ALLOWED_ORIGINS = list(dict.fromkeys(
-    ['https://127.0.0.1', 'https://localhost'] + _csv_env('DJANGO_CORS_ALLOWED_ORIGINS')
+    _LOOPBACK_ORIGINS + _csv_env('DJANGO_CORS_ALLOWED_ORIGINS')
 ))
 
 CORS_ALLOW_METHODS = (
@@ -175,7 +189,7 @@ SPECTACULAR_SETTINGS = {
     # 'PREPROCESSING_HOOKS': ['artifactmgr.server.api_filters.preprocessing_filter_spec'],
     'TITLE': 'FABRIC Publication Tracker',
     'DESCRIPTION': 'A platform for sharing FABRIC related publications.',
-    'VERSION': '1.12.0',
+    'VERSION': '1.12.1',
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
     'COMPONENT_SPLIT_REQUEST': True,

@@ -55,7 +55,9 @@ class ApiUser(models.Model):
     def is_authenticated(self):
         return self.uuid != os.getenv('API_USER_ANON_UUID')
 
-    @property
+    # A method, not a property. As a @property taking an argument it could never be
+    # evaluated -- attribute access raised TypeError before the argument could be
+    # supplied -- so any check written against it was broken by construction.
     def is_project_member(self, project_uuid: str) -> bool:
         return project_uuid in self.projects
 

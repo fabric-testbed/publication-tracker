@@ -39,8 +39,23 @@ vouch:
         secret: <vouch_config_secret>
 
     cookie:
-        # allow the jwt/cookie to be set into http://yourdomain.com (defaults to true, requiring https://yourdomain.com)
-        secure: false
+        # This cookie is the session credential -- whoever holds it is the user. All
+        # three attributes below were absent or off, so a deployment copying this
+        # template as-is sent it over plaintext http, exposed it to any script on the
+        # page, and left cross-site request protection to whatever the browser happened
+        # to default to (Chrome enforces Lax; Firefox and Safari do not).
+        #
+        # secure: the cookie is only ever sent over https. The compose stack terminates
+        # TLS at nginx and publishes https on NGINX_HTTPS_PORT, so this holds for local
+        # development too.
+        secure: true
+        # httpOnly: not readable from JavaScript. Nothing in this application reads it
+        # from the browser -- the cookie is decoded server-side in utils/fabric_auth.py.
+        httpOnly: true
+        # sameSite: not attached to cross-site requests that are not top-level
+        # navigations. 'lax' rather than 'strict' so that arriving from an external link
+        # still leaves you logged in.
+        sameSite: lax
         # vouch.cookie.domain must be set when enabling allowAllUsers
         domain: 127.0.0.1
         name: fabric-service
