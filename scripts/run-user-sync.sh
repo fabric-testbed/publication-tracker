@@ -10,12 +10,22 @@ set -uo pipefail
 # on this host's lock file.
 
 cd /code
+
+# This script runs without `set -e`, so a failed `source` does not stop it -- it used to
+# carry on with no environment at all and die thirty traceback lines later on
+# "DJANGO_SECRET_KEY is not set", which names the wrong problem. The job runs as appuser
+# (uid/gid 20049) from 1.13.1 on, so an unreadable .env is a real possibility.
+if [ ! -r .env ]; then
+    echo "user sync: FAILED - /code/.env is not readable by $(id -un) (uid $(id -u), gid $(id -g))"
+    echo "user sync: share it by group -- chown <operator>:20049 .env && chmod 0640 .env"
+    exit 1
+fi
 source .env
 
 # The venv's interpreter by absolute path rather than a bare `python` off PATH. Under
 # cron there is no inherited PATH to speak of, and a `python` that silently resolved to
 # the system interpreter would fail on the first import.
-PYTHON=/code/.venv/bin/python
+PYTHON=/opt/venv/bin/python
 
 echo "=== user sync starting $(date -u '+%Y-%m-%d %H:%M:%S') UTC ==="
 

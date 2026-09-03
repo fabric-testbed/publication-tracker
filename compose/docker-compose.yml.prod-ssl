@@ -15,13 +15,19 @@ services:
 #      - "8000:8000"
     depends_on:
       - database
+    # /code is the host's git checkout. It is read-only here so that a boot cannot write
+    # into it -- which it used to, as root: a .venv/, a re-resolved uv.lock and
+    # collectstatic output all landed in the deploy checkout (#31 finding 9). The two
+    # directories the app genuinely writes get their own read-write sub-mounts, and
+    # nothing else on the checkout is writable at all.
     volumes:
-      - ./:/code
-#      - ./static:/code/static
-#      - ./media:/code/media
+      - ./:/code:ro
+      - ./static:/code/static
+      - ./media:/code/media
+    # UWSGI_UID/UWSGI_GID are gone: the container runs as appuser (uid 20049) from the
+    # image, so uwsgi has nothing to drop to. They still apply to run_server.sh's
+    # local-ssl mode on a workstation, and stay documented in env.template.
     environment:
-      - UWSGI_UID=${UWSGI_UID}
-      - UWSGI_GID=${UWSGI_GID}
       - LOAD_FIXTURES=${LOAD_FIXTURES:-0}
     restart: unless-stopped
 
@@ -34,13 +40,19 @@ services:
       dockerfile: Dockerfile
     container_name: pubtrkr-cron
     entrypoint: ["/code/docker-entrypoint-cron.sh"]
+    # The only service that overrides the image's USER. cron -f has to start as root to
+    # read /etc/cron.d and to su to the job's user; the sync itself drops to appuser in
+    # docker-entrypoint-cron.sh, so the work does not run privileged.
+    user: root
     networks:
       - pubtrkr-network
     depends_on:
       - database
       - django
+    # Read-only, with no sub-mounts: this container reads .env and the scripts and
+    # writes nothing outside the database.
     volumes:
-      - ./:/code
+      - ./:/code:ro
     restart: unless-stopped
 
   database:
@@ -70,7 +82,8 @@ services:
       - "${NGINX_HTTP_PORT:-8080}:80"
       - "${NGINX_HTTPS_PORT:-8443}:443"
     volumes:
-      - .:/code
+      # nginx only ever reads static/ and media/ from the checkout.
+      - .:/code:ro
       - ${NGINX_DEFAULT_CONF}:/etc/nginx/conf.d/default.conf
       - ${NGINX_NGINX_CONF}:/etc/nginx/nginx.conf
       - ${NGINX_SSL_CERTS_DIR}:/etc/ssl:ro

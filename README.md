@@ -174,7 +174,7 @@ cp env.template .env
 
 | Variable | Example | Description |
 |---|---|---|
-| `PYTHONPATH` | `./:./venv:./.venv` | Python module search path |
+| `PYTHONPATH` | `./` | Python module search path |
 | `DJANGO_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated allowed hostnames |
 | `DJANGO_SECRET_KEY` | `<random string>` | Django secret key |
 | `DJANGO_DEBUG` | `false` | Django debug mode |
@@ -207,8 +207,11 @@ cp env.template .env
 
 | Variable | Default | Description |
 |---|---|---|
-| `UWSGI_UID` | `<user_uid>` | uWSGI process UID |
-| `UWSGI_GID` | `<user_gid>` | uWSGI process GID |
+| `UWSGI_UID` | `<user_uid>` | uWSGI process UID — `local-ssl` run-mode only |
+| `UWSGI_GID` | `<user_gid>` | uWSGI process GID — `local-ssl` run-mode only |
+
+The Docker run-mode ignores both. That container starts unprivileged as `appuser`
+(uid 20049) from the image, so uwsgi has no privilege to drop.
 
 ### Vouch Proxy Configuration
 
@@ -259,6 +262,9 @@ TODO: Generation of development self-signed certificates is described in `ssl/` 
 All commands run from `publication-tracker/`.
 
 ```bash
+# Build the image -- required on every release, see below
+docker compose build
+
 # Start all services
 docker compose up -d
 
@@ -268,6 +274,26 @@ docker compose logs -f
 # Stop all services
 docker compose down
 ```
+
+**`docker compose build` is required on every release.** Dependencies are installed
+into `/opt/venv` inside the image at build time with `uv sync --frozen`; nothing
+resolves or installs at container start any more, so a release that moves `uv.lock`
+reaches the running container only through a rebuild. A restart alone will keep serving
+the previous dependency set.
+
+Two other properties of the production container are worth knowing before you change a
+mount or a command:
+
+- **It runs as `appuser`, 20049:20049**, which is `nrig-service` on the FABRIC host.
+  That identity is what lets the container write the `static/` and `media/` sub-mounts on
+  the host checkout, and it must also be able to *read* `.env` -- on a host where the
+  operator account is not nrig-service, share it by group
+  (`chown <operator>:20049 .env && chmod 0640 .env`). A different host needs its own
+  mapping.
+- **`/code` is mounted read-only**, with read-write sub-mounts for `static/` and
+  `media/` alone. A boot leaves the deploy checkout untouched, so `git status` there
+  stays clean. Anything that needs to write elsewhere under `/code` will fail with
+  `EACCES`, and that is the intended answer.
 
 The application is available at:
 - `http://localhost:8080` (redirects to HTTPS)

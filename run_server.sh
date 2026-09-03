@@ -115,7 +115,20 @@ case "${RUN_MODE}" in
         ;;
     docker)
         echo "docker"
-        uwsgi --uid "${UWSGI_UID:-1000}" --gid "${UWSGI_GID:-1000}" --virtualenv ./.venv --ini publicationtrkr.ini
+        # No --uid/--gid: the container already runs as appuser (uid 20049), and uwsgi
+        # cannot setuid or setgid when it did not start privileged -- passing them is
+        # now a fatal error, not a no-op. The virtualenv is the image's, outside the
+        # read-only /code mount.
+        #
+        # The unset is not belt-and-braces. uwsgi turns any UWSGI_<option> environment
+        # variable into that option, so the UWSGI_UID/UWSGI_GID that .env exports become
+        # --uid/--gid here no matter what this command line says; dropping them from the
+        # compose `environment:` block is not enough, because the entrypoint sources
+        # .env itself. Without this, the container dies at
+        # "cannot setgid() as non-root user". They still apply to local-ssl above, which
+        # does start as root on a workstation.
+        unset UWSGI_UID UWSGI_GID
+        uwsgi --virtualenv /opt/venv --ini publicationtrkr.ini
         ;;
     *)
         echo "ModeRequired: -r | --run-mode <local-dev | local-ssl | docker>"
