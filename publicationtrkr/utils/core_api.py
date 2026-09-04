@@ -93,3 +93,34 @@ def get_journey_tracker_people(start_date, end_date, token: str) -> list[dict]:
         return api_call.json().get('results') or []
     finally:
         s.close()
+
+
+def get_core_api_metrics_people(token: str) -> list[dict]:
+    """
+    Fetch the Scholar/Scopus identifiers core-api holds for the whole FABRIC population.
+
+    Needs a **services**-class token, not the readonly one the rest of the sync uses. The
+    two classes are disjoint rather than nested: this endpoint answers 401 to the readonly
+    token, and /journey-tracker/people answers 401 to the services token, so both live in
+    .env and neither replaces the other.
+
+    Unlike /journey-tracker/people this is neither windowed nor paginated -- one request
+    returns every person, 3,311 of them on 2026-09-04. Rows carry uuid, active,
+    bastion_login, google_scholar, scopus and last_updated; notably no name, email or
+    roles, which is why a uuid seen only here cannot be turned into a usable ApiUser.
+
+    Raises rather than returning an empty list on failure, for the same reason
+    get_journey_tracker_people does: "nobody has an identifier" and "we could not ask" are
+    different facts, and only the caller can decide what to do about the second.
+    """
+    s = requests.Session()
+    try:
+        s.auth = BearerAuth(token=token)
+        api_call = s.get(
+            url=os.getenv('FABRIC_CORE_API') + '/core-api-metrics/people',
+            timeout=CORE_API_SYNC_TIMEOUT,
+        )
+        api_call.raise_for_status()
+        return api_call.json().get('results') or []
+    finally:
+        s.close()

@@ -10,6 +10,12 @@ visited, and admins could not see the FABRIC population at all. The source here 
 `GET /journey-tracker/people` on core-api, a peer-service ingest endpoint that already
 existed -- roughly 3,300 people in production, returned unpaginated.
 
+Since v1.15.0 a second, independent pass reads `GET /core-api-metrics/people` for the
+Google Scholar and Scopus identifiers author-claim scoring uses as a weak prior (#32).
+It runs here, in the nightly sync, rather than at scoring time on purpose: scoring stays
+a pure local computation over rows it has already loaded, with no network call inside an
+O(authors x users) loop. One request per sync, never one per person.
+
 What it deliberately does NOT do
 --------------------------------
 * It never deletes. `Publication.created_by` / `modified_by` are `SET_NULL`, so removing
@@ -39,6 +45,7 @@ from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
 from publicationtrkr.apps.apiuser.utils.locks import SYNC_ADVISORY_LOCK_KEY, advisory_lock
 from publicationtrkr.utils.core_api import (
     JOURNEY_TRACKER_MAX_WINDOW_DAYS,
+    get_core_api_metrics_people,
     get_journey_tracker_people,
 )
 from publicationtrkr.utils.fabric_auth import split_fabric_roles
@@ -60,6 +67,11 @@ WATERMARK_OVERLAP = timedelta(hours=1)
 
 # Fields the sync owns. Everything else on ApiUser belongs to the login path.
 SYNCED_FIELDS = ('active', 'affiliation', 'email', 'fabric_roles', 'name', 'projects')
+
+# Fields the Scholar/Scopus pass owns (#32). Deliberately disjoint from SYNCED_FIELDS:
+# they come from a different endpoint, under a different token, in a pass with a different
+# shape, and one failing must not leave the other half-written.
+METRICS_FIELDS = ('google_scholar', 'scopus')
 
 
 def iter_windows(start, end, newest_first: bool = False):
@@ -283,6 +295,11 @@ class Command(BaseCommand):
                     ))
                     errors += 1
 
+        # After the window loop, so people this run created are in `existing` and get
+        # their identifiers on the same pass that created them; before the watermark,
+        # so the whole report is one block.
+        metrics = self._sync_metrics(existing=existing, dry_run=dry_run)
+
         watermark_note = 'not advanced (dry run)'
         if not dry_run and tracker is not None:
             tracker.value = (now - WATERMARK_OVERLAP).isoformat()
@@ -312,4 +329,105 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR('Errors       : {0}'.format(errors)))
         else:
             self.stdout.write('Errors       : {0}'.format(errors))
+        if metrics is None:
+            self.stdout.write('Scholar/Scopus: pass did not run')
+        else:
+            self.stdout.write(
+                'Scholar/Scopus: {0} of {1} person record(s) carry an identifier; '
+                '{2} row(s) {3}, {4} uuid(s) not in the directory'.format(
+                    metrics['with_ids'], metrics['seen'], metrics['changed'],
+                    'would change' if dry_run else 'changed', metrics['unknown'],
+                )
+            )
         self.stdout.write('Watermark    : {0}'.format(watermark_note))
+
+    def _sync_metrics(self, existing, dry_run):
+        """
+        Refresh google_scholar / scopus from /core-api-metrics/people (#32).
+
+        Its own pass rather than a step inside the per-window loop, because the two
+        endpoints have different shapes: /journey-tracker/people is windowed and
+        incremental, /core-api-metrics/people is one unwindowed snapshot of the whole
+        population. Folding it into the loop would refresh identifiers only for people
+        whose journey-tracker record happened to change in that window, and would repeat
+        the same full-population request once per window.
+
+        Returns a counts dict, or None when the pass did not run.
+
+        Deliberately does **not** stamp `last_synced`. That field means "the
+        journey-tracker sync touched this row", and this endpoint returns everybody every
+        time -- stamping it would set it to now for all 3,300 people on every run and
+        flatten the only staleness signal the directory has.
+        """
+        token = os.getenv('FABRIC_CORE_API_SERVICES_TOKEN')
+        if not token:
+            # Warn and skip, never raise. This is a second, disjoint credential: the
+            # services token cannot read /journey-tracker/people and the readonly token
+            # cannot read this endpoint. Copying the CommandError guard above would turn a
+            # working nightly directory sync into a hard failure on any host whose .env
+            # lagged the restart -- the same shape as the USR_* triple that bit the 1.12.0
+            # deploy. The identifier columns simply keep the values they already hold.
+            self.stdout.write(self.style.WARNING(
+                'FABRIC_CORE_API_SERVICES_TOKEN is not set -- skipping the Scholar/Scopus '
+                'pass and leaving those columns untouched. The directory sync above is '
+                'unaffected. See env.template.'
+            ))
+            return None
+
+        try:
+            people = get_core_api_metrics_people(token=token)
+        except Exception as exc:
+            # Reported, not raised, and specifically *not* a CommandError. Unlike a
+            # journey-tracker window -- where a silent gap hides people until someone runs
+            # --full -- nothing is lost by not refreshing a weak prior tonight: the columns
+            # keep yesterday's values and tomorrow's run picks them up. The fetcher raises
+            # rather than returning [] so that "we could not ask" is distinguishable from
+            # "nobody has an identifier" right here, which is what makes this branch
+            # possible at all.
+            self.stdout.write(self.style.ERROR(
+                'Scholar/Scopus pass failed: {0}. Identifiers left unchanged.'.format(exc)
+            ))
+            return None
+
+        changed_rows = unknown = with_ids = 0
+        seen = set()
+        for person in people:
+            uuid = person.get('uuid')
+            if not uuid or uuid in seen:
+                continue
+            seen.add(uuid)
+            values = {
+                # Both columns are CharField(blank=True) and NOT NULL, and the endpoint
+                # returns null far more often than not, so every value is coerced to ''.
+                'google_scholar': person.get('google_scholar') or '',
+                'scopus': person.get('scopus') or '',
+            }
+            if values['google_scholar'] or values['scopus']:
+                with_ids += 1
+
+            api_user = existing.get(uuid)
+            if api_user is None:
+                # Known to core-api but not in our directory. Not created here: this
+                # endpoint carries no name, email, affiliation or roles, so the row would
+                # be a uuid with two identifiers on it and nothing to name-match against.
+                # /journey-tracker/people is the only thing that creates ApiUser rows.
+                unknown += 1
+                continue
+
+            changed = [f for f in METRICS_FIELDS if getattr(api_user, f) != values[f]]
+            if not changed:
+                continue
+            changed_rows += 1
+            if not dry_run:
+                for field in changed:
+                    setattr(api_user, field, values[field])
+                # update_fields is exactly the changed identifier columns -- no
+                # last_synced, and nothing the journey-tracker pass owns.
+                api_user.save(update_fields=changed)
+
+        return {
+            'seen': len(seen),
+            'with_ids': with_ids,
+            'changed': changed_rows,
+            'unknown': unknown,
+        }

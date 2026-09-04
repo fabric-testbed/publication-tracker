@@ -201,7 +201,7 @@ SPECTACULAR_SETTINGS = {
     # 'PREPROCESSING_HOOKS': ['artifactmgr.server.api_filters.preprocessing_filter_spec'],
     'TITLE': 'FABRIC Publication Tracker',
     'DESCRIPTION': 'A platform for sharing FABRIC related publications.',
-    'VERSION': '1.14.0',
+    'VERSION': '1.15.0',
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
     'COMPONENT_SPLIT_REQUEST': True,

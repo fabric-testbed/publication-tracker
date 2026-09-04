@@ -29,8 +29,15 @@ from publicationtrkr.apps.publications.api.viewsets import (
 from publicationtrkr.apps.publications.forms import PublicationForm
 from publicationtrkr.apps.publications.models import Author, AuthorClaim, Publication
 from publicationtrkr.apps.publications.utils.claim_scoring import (
+    MIN_SCORE,
     WEIGHT_NAME,
+    WEIGHT_PROJECT,
+    WEIGHT_PROPAGATION,
+    WEIGHT_SCHOLAR,
+    build_coauthorship_graph,
     candidates_for_author,
+    propagation_signal,
+    scholar_signal,
     score_pair,
 )
 from publicationtrkr.apps.publications.utils.name_matching import (
@@ -731,26 +738,47 @@ class ClaimScoringTests(SimpleTestCase):
     """The weighting, exercised without a database."""
 
     class _User:
-        def __init__(self, name, projects, uuid='u-1'):
+        def __init__(self, name, projects, uuid='u-1', google_scholar='', scopus=''):
             self.name = name
             self.projects = projects
             self.uuid = uuid
+            self.google_scholar = google_scholar
+            self.scopus = scopus
 
     class _Author:
         def __init__(self, author_name):
             self.author_name = author_name
 
     class _Publication:
-        def __init__(self, project_uuid):
+        def __init__(self, project_uuid, uuid='pub-1'):
             self.project_uuid = project_uuid
+            self.uuid = uuid
 
-    def test_exact_name_in_the_same_project_is_full_confidence(self):
+    def test_a_perfect_pair_on_every_signal_is_full_confidence(self):
+        # Before v1.15.0 name + project alone scored 1.0. Two signals were added, so a
+        # score of 1.0 now means all four fired -- an exact name, a shared project, an
+        # adjacent publication and an identifier on record. This is not a cosmetic
+        # update to a broken assertion: it is the assertion that the weights still sum
+        # to a readable confidence, restated over the full signal set.
+        result = score_pair(
+            self._Author('Smith, Jane'),
+            self._User('Jane Smith', ['p-1'], google_scholar='u3J2tc0AAAAJ'),
+            self._Publication('p-1'),
+            {'pub-1': {'u-1': 'also attributed on an adjacent publication'}},
+        )
+        self.assertEqual(result['score'], 1.0)
+
+    def test_name_and_project_alone_no_longer_reach_1_0(self):
+        # The renormalisation, stated as a fact rather than left implicit in the test
+        # above: what used to be a perfect score is now k = 0.8 of one, and the
+        # remaining 0.2 is reserved for evidence the pair does not have.
         result = score_pair(
             self._Author('Smith, Jane'),
             self._User('Jane Smith', ['p-1']),
             self._Publication('p-1'),
         )
-        self.assertEqual(result['score'], 1.0)
+        self.assertAlmostEqual(result['score'], WEIGHT_PROJECT + WEIGHT_NAME)
+        self.assertAlmostEqual(result['score'], 0.8)
 
     def test_project_membership_outweighs_a_bare_initial(self):
         with_project = score_pair(
@@ -779,7 +807,7 @@ class ClaimScoringTests(SimpleTestCase):
         result = score_pair(
             self._Author('Smith, J.'), self._User('Jane Smith', ['p-1']),
             self._Publication('p-1'))
-        for signal in ('project', 'name'):
+        for signal in ('project', 'name', 'propagation', 'scholar'):
             self.assertTrue(result['signals'][signal]['detail'])
 
     def test_candidates_come_back_best_first(self):
@@ -791,6 +819,257 @@ class ClaimScoringTests(SimpleTestCase):
         ]
         ranked = candidates_for_author(author, users, publication)
         self.assertEqual([u.uuid for _, u, _ in ranked], ['in-project', 'no-project'])
+
+
+# Author-claim scoring phase 2 (issue #32, v1.15.0)
+#
+# Two new signals and the weight renormalisation they force. The renormalisation is the
+# risk in this release, not either signal: adding weights rescales every score already
+# stored, and score_author_claims deletes rows that stop scoring rather than demoting
+# them, so getting it wrong silently deletes correct suggestions from a live queue.
+
+
+class ClaimScoringWeightInvariantTests(SimpleTestCase):
+    """
+    The two rules the weight vector has to keep, asserted rather than commented.
+
+    Both are properties of the *numbers*, so they hold for any future retuning as long as
+    someone runs the tests -- which is the point of writing them down here rather than in
+    the module docstring alone.
+    """
+
+    def test_the_weights_sum_to_one_so_a_score_reads_as_a_confidence(self):
+        self.assertAlmostEqual(
+            WEIGHT_PROJECT + WEIGHT_NAME + WEIGHT_PROPAGATION + WEIGHT_SCHOLAR, 1.0
+        )
+
+    def test_propagation_alone_can_never_qualify_a_pair(self):
+        # The bound that contains the compounding failure the issue names as the one to
+        # design against: approve -> propagate -> suggest -> approve, with the admin as
+        # the only damper. A wrongly approved `Silva` propagates to every `Silva` on
+        # every adjacent paper; below MIN_SCORE those pairs can be reordered but never
+        # surfaced on graph proximity alone.
+        self.assertLess(WEIGHT_PROPAGATION, MIN_SCORE)
+
+    def test_neither_new_signal_can_promote_a_pair_on_its_own(self):
+        # Same rule as above, stated over both new signals together and exercised
+        # through the real scorer rather than the constants: a surname match with an
+        # outright given-name conflict and no project scores GIVEN_MISMATCH = 0.0 on
+        # name, so the two new signals are all it has.
+
+        class _U:
+            name = 'Jane Smith'
+            projects = []
+            uuid = 'u-1'
+            google_scholar = 'u3J2tc0AAAAJ'
+            scopus = '7005432109'
+
+        class _A:
+            author_name = 'Smith, John'
+
+        class _P:
+            project_uuid = None
+            uuid = 'pub-1'
+
+        result = score_pair(
+            _A(), _U(), _P(), {'pub-1': {'u-1': 'adjacent'}}
+        )
+        self.assertEqual(result['signals']['name']['value'], 0.0)
+        self.assertEqual(result['signals']['propagation']['value'], 1.0)
+        self.assertEqual(result['signals']['scholar']['value'], 1.0)
+        self.assertLess(result['score'], MIN_SCORE)
+
+    def test_the_v1_14_0_bottom_band_survives_the_renormalisation(self):
+        # The six real suggestions at 0.315 -- `E. Kfoury` -> `Elie Kfoury` and two like
+        # it -- sat 0.015 above the old MIN_SCORE of 0.30. They are correct suggestions,
+        # and a naive renormalisation would have deleted them. Scaling MIN_SCORE by the
+        # same k as the weights is what keeps them.
+        old_band = 0.7 * 0.45          # FULL_VS_INITIAL against the old WEIGHT_NAME
+        new_band = 0.7 * WEIGHT_NAME
+        self.assertAlmostEqual(old_band, 0.315)
+        self.assertGreaterEqual(new_band, MIN_SCORE)
+
+
+class ScholarSignalTests(SimpleTestCase):
+    """Presence only, and absence read as no signal rather than as a negative."""
+
+    class _User:
+        def __init__(self, google_scholar='', scopus=''):
+            self.name = 'Jane Smith'
+            self.projects = []
+            self.uuid = 'u-1'
+            self.google_scholar = google_scholar
+            self.scopus = scopus
+
+    def test_no_identifier_is_no_signal(self):
+        # 3,303 of 3,311 people have neither. Reading absence as evidence against would
+        # penalise almost everyone over a field nobody has been asked to fill in.
+        value, detail = scholar_signal(self._User())
+        self.assertEqual(value, 0.0)
+        self.assertIn('no Google Scholar or Scopus identifier', detail)
+
+    def test_either_identifier_fires_the_signal(self):
+        self.assertEqual(scholar_signal(self._User(google_scholar='u3J2tc0AAAAJ'))[0], 1.0)
+        self.assertEqual(scholar_signal(self._User(scopus='7005432109'))[0], 1.0)
+
+    def test_the_detail_names_which_identifiers_are_held(self):
+        _, detail = scholar_signal(
+            self._User(google_scholar='u3J2tc0AAAAJ', scopus='7005432109'))
+        self.assertIn('Google Scholar and Scopus', detail)
+
+    def test_whitespace_is_not_an_identifier(self):
+        self.assertEqual(scholar_signal(self._User(google_scholar='   '))[0], 0.0)
+
+    def test_a_row_predating_the_columns_scores_rather_than_raising(self):
+        # score_pair works on whatever it is handed, including the hand-rolled stubs
+        # elsewhere in this file and any caller written before apiuser/0005.
+        class _Old:
+            name = 'Jane Smith'
+            projects = []
+            uuid = 'u-1'
+
+        self.assertEqual(scholar_signal(_Old())[0], 0.0)
+
+
+class CoauthorshipGraphTests(SimpleTestCase):
+    """
+    Depth-1 adjacency over publications, through person identity.
+
+    `attributions` are (person_uuid, publication_uuid) pairs -- what the command reads out
+    of `Author.fabric_uuid`.
+    """
+
+    ATTRIBUTIONS = [
+        ('alice', 'P1'), ('bob', 'P1'),
+        ('bob', 'P2'), ('carol', 'P2'),
+        ('carol', 'P3'), ('dave', 'P3'),
+        ('erin', 'P9'),
+    ]
+
+    def test_a_shared_person_makes_two_publications_adjacent(self):
+        graph = build_coauthorship_graph(self.ATTRIBUTIONS)
+        # P1 and P2 share bob, so carol -- attributed on P2 -- is reachable from P1.
+        self.assertIn('carol', graph['P1'])
+
+    def test_adjacency_is_depth_one_only(self):
+        # P1 -> P2 (via bob) -> P3 (via carol). dave is on P3 and must NOT be reachable
+        # from P1: on a 191-publication graph depth 2 is close to "is in the corpus", and
+        # any decay factor would be invented rather than measured.
+        graph = build_coauthorship_graph(self.ATTRIBUTIONS)
+        self.assertNotIn('dave', graph['P1'])
+        self.assertIn('dave', graph['P2'])
+
+    def test_a_person_already_on_the_publication_is_not_in_its_reach(self):
+        # Otherwise propagation proposes one person for two author slots of the same
+        # paper, reached by their own attribution reflected back through themselves.
+        graph = build_coauthorship_graph(self.ATTRIBUTIONS)
+        self.assertNotIn('alice', graph['P1'])
+        self.assertNotIn('bob', graph['P1'])
+
+    def test_an_isolated_publication_has_no_entry_at_all(self):
+        graph = build_coauthorship_graph(self.ATTRIBUTIONS)
+        self.assertNotIn('P9', graph)
+
+    def test_blank_and_missing_uuids_are_excluded(self):
+        # fabric_uuid is blank=True, null=True. A '' read as a person uuid would be a
+        # person every publication holding one has in common, collapsing unrelated papers
+        # into a single clique and handing every candidate on them a boost.
+        graph = build_coauthorship_graph(
+            [('', 'P1'), ('', 'P2'), (None, 'P3'), ('alice', None)]
+        )
+        self.assertEqual(graph, {})
+
+    def test_the_detail_names_the_source_publication_and_the_co_author(self):
+        graph = build_coauthorship_graph(
+            self.ATTRIBUTIONS,
+            publication_labels={'P2': 'A Second Paper'},
+            person_labels={'bob': 'Bob Bobson'},
+        )
+        self.assertIn('A Second Paper', graph['P1']['carol'])
+        self.assertIn('Bob Bobson', graph['P1']['carol'])
+
+    def test_labels_fall_back_to_uuids_rather_than_failing(self):
+        graph = build_coauthorship_graph(self.ATTRIBUTIONS)
+        self.assertIn('P2', graph['P1']['carol'])
+        self.assertIn('bob', graph['P1']['carol'])
+
+    def test_the_chosen_witness_is_stable_across_input_orderings(self):
+        # A person can be reachable through several co-authors and several publications,
+        # and only the first one found becomes the `detail`. Set iteration order over
+        # strings varies between processes, so an unsorted traversal picks a different
+        # witness each night: same score, unequal signals dict, and the row is rewritten
+        # forever. The fabric-dev rehearsal caught this as 12 rows "updated" with 0
+        # raised and 0 lowered.
+        multi_witness = [
+            ('target', 'P2'), ('target', 'P3'),
+            ('via_a', 'P1'), ('via_a', 'P2'),
+            ('via_b', 'P1'), ('via_b', 'P3'),
+        ]
+        first = build_coauthorship_graph(multi_witness)
+        shuffled = build_coauthorship_graph(list(reversed(multi_witness)))
+        self.assertEqual(first, shuffled)
+        # And it is the lowest-sorting witness that wins, not an arbitrary one.
+        self.assertIn('via_a', first['P1']['target'])
+
+
+class PropagationSignalTests(SimpleTestCase):
+    """The signal itself, and the boundary it must not cross."""
+
+    class _User:
+        def __init__(self, uuid='u-1'):
+            self.name = 'Jane Smith'
+            self.projects = []
+            self.uuid = uuid
+            self.google_scholar = ''
+            self.scopus = ''
+
+    class _Author:
+        def __init__(self, author_name='Smith, Jane'):
+            self.author_name = author_name
+
+    class _Publication:
+        def __init__(self, uuid='pub-1', project_uuid=None):
+            self.uuid = uuid
+            self.project_uuid = project_uuid
+
+    GRAPH = {'pub-1': {'u-1': 'also attributed on "Another paper"'}}
+
+    def test_an_adjacent_attribution_fires_the_signal(self):
+        value, detail = propagation_signal(
+            self._User(), self._Publication(), self.GRAPH)
+        self.assertEqual(value, 1.0)
+        self.assertIn('Another paper', detail)
+
+    def test_a_candidate_outside_the_neighbourhood_gets_nothing(self):
+        value, _ = propagation_signal(
+            self._User(uuid='stranger'), self._Publication(), self.GRAPH)
+        self.assertEqual(value, 0.0)
+
+    def test_no_graph_and_no_publication_are_both_no_signal(self):
+        # The default path for every caller written before v1.15.0, and for a scoring
+        # run over a corpus where nothing has been claimed yet.
+        self.assertEqual(propagation_signal(self._User(), self._Publication(), None)[0], 0.0)
+        self.assertEqual(propagation_signal(self._User(), None, self.GRAPH)[0], 0.0)
+        self.assertEqual(propagation_signal(self._User(), self._Publication('other'),
+                                            self.GRAPH)[0], 0.0)
+
+    def test_propagation_reorders_candidates_without_qualifying_one(self):
+        # What the signal is *for*, and the whole of what it is for. Two candidates the
+        # scorer has already evaluated; the one in the neighbourhood ranks first.
+        author = self._Author('Smith, J.')
+        publication = self._Publication()
+        users = [self._User(uuid='stranger'), self._User(uuid='u-1')]
+        ranked = candidates_for_author(author, users, publication, self.GRAPH)
+        self.assertEqual([u.uuid for _, u, _ in ranked], ['u-1', 'stranger'])
+
+    def test_propagation_never_bypasses_the_surname_gate(self):
+        # The gate is what keeps the queue finite -- without it every author pairs with
+        # every one of 3,300 users. Adjacency says nothing about *which* author string on
+        # a paper a person is, so a propagation-driven candidate pass would confidently
+        # propose that `Papadimitriou, G.` is Jane Smith.
+        self.assertIsNone(score_pair(
+            self._Author('Okonkwo, G.'), self._User(), self._Publication(), self.GRAPH
+        ))
 
 
 class ScoreAuthorClaimsCommandTests(TestCase):
@@ -820,12 +1099,91 @@ class ScoreAuthorClaimsCommandTests(TestCase):
         self.assertIn('DRY RUN', output)
         self.assertEqual(AuthorClaim.objects.count(), 0)
 
+    def _make_adjacent_neighbourhood(self):
+        """
+        A second publication sharing a claimed person with pub-1, so that pub-1 has a
+        co-authorship neighbourhood and self.api_user sits inside it.
+
+        pub-1: Smith, Jane   (unclaimed -- the author being scored)
+               Bobson, Bob   (claimed by user-b)
+        pub-2: Bobson, Bob   (claimed by user-b -- the shared person)
+               Smith, J.     (claimed by user-1 -- the candidate this should boost)
+        """
+        Publication.objects.create(
+            authors=['Bobson, Bob', 'Smith, J.'], project_uuid='p-2',
+            title='Another paper', uuid='pub-2', year='2026',
+        )
+        ApiUser.objects.create(
+            uuid='user-b', name='Bob Bobson', projects=['p-1'], active=True)
+        Author.objects.create(
+            author_name='Bobson, Bob', display_name='Bobson, Bob',
+            publication_uuid='pub-1', uuid='auth-2', fabric_uuid='user-b')
+        Author.objects.create(
+            author_name='Bobson, Bob', display_name='Bobson, Bob',
+            publication_uuid='pub-2', uuid='auth-3', fabric_uuid='user-b')
+        Author.objects.create(
+            author_name='Smith, J.', display_name='Smith, J.',
+            publication_uuid='pub-2', uuid='auth-4', fabric_uuid='user-1')
+
+    def test_propagation_fires_through_the_real_graph(self):
+        self._make_adjacent_neighbourhood()
+        self._run()
+        claim = AuthorClaim.objects.get(author=self.author, api_user=self.api_user)
+        propagation = claim.signals['propagation']
+        self.assertEqual(propagation['value'], 1.0)
+        # The detail is what makes an approved propagated claim auditable afterwards.
+        self.assertIn('Another paper', propagation['detail'])
+        self.assertIn('Bob Bobson', propagation['detail'])
+
+    def test_the_graph_comes_from_fabric_uuid_not_from_approved_claims(self):
+        # Production holds zero rows with status='approved' -- the 656 claims are 579
+        # self_asserted and 77 suggested. Sourced as the issue specifies, propagation
+        # would compute an empty graph and do nothing forever. This asserts the source
+        # actually used: attributions, with no AuthorClaim rows in existence at all.
+        self._make_adjacent_neighbourhood()
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+        self._run()
+        claim = AuthorClaim.objects.get(author=self.author, api_user=self.api_user)
+        self.assertEqual(claim.signals['propagation']['value'], 1.0)
+
+    def test_a_person_holding_another_slot_on_the_same_publication_gets_no_boost(self):
+        # user-b is attributed on pub-1 already. Propagating them onto a second author
+        # slot of the same paper would be proposing one person is two of its authors.
+        self._make_adjacent_neighbourhood()
+        ApiUser.objects.filter(uuid='user-b').update(name='Jane Smith')
+        self._run()
+        claim = AuthorClaim.objects.filter(
+            author=self.author, api_user__uuid='user-b').first()
+        self.assertIsNotNone(claim)
+        self.assertEqual(claim.signals['propagation']['value'], 0.0)
+
+    def test_the_run_reports_score_movement_not_just_counts(self):
+        # After a weights change every standing suggestion is "updated", so the summary
+        # counts say nothing about whether the renormalisation ate correct suggestions.
+        # `Lowest kept` against MIN_SCORE is the line that does.
+        output = self._run('--dry-run')
+        self.assertIn('Score movement', output)
+        self.assertIn('Lowest kept', output)
+        self.assertIn('MIN_SCORE = 0.24', output)
+
+    def test_the_header_reports_the_size_of_the_co_authorship_graph(self):
+        self._make_adjacent_neighbourhood()
+        output = self._run('--dry-run')
+        self.assertIn('Co-authorship  : 3 attribution(s)', output)
+        # One, not two. pub-2's only neighbour is pub-1, whose sole attributed person
+        # (user-b) is already on pub-2 -- so pub-2 reaches nobody new and is absent from
+        # the graph entirely. Adjacency is symmetric; reach is not.
+        self.assertIn('1 publication(s) have a neighbourhood', output)
+
     def test_scoring_creates_a_suggestion_and_leaves_attribution_alone(self):
         self._run()
         claim = AuthorClaim.objects.get()
         self.assertEqual(claim.status, AuthorClaim.SUGGESTED)
         self.assertEqual(claim.source, AuthorClaim.MACHINE)
-        self.assertEqual(claim.score, 1.0)
+        # Exact name and a shared project, with no adjacent publication and no identifier
+        # on record. That was 1.0 before v1.15.0 and is k = 0.8 of one after it: the
+        # remaining 0.2 is reserved for evidence this pair does not have.
+        self.assertAlmostEqual(claim.score, WEIGHT_PROJECT + WEIGHT_NAME)
         self.author.refresh_from_db()
         self.assertIsNone(self.author.fabric_uuid)
 
@@ -911,7 +1269,7 @@ class ClaimLedgerTests(TestCase):
         self.admin = ApiUser.objects.create(uuid='admin-1', name='An Admin')
         self.claim = AuthorClaim.objects.create(
             author=self.author, api_user=self.jane, score=1.0, uuid='claim-1',
-            signals={'name': {'weight': 0.45, 'value': 1.0, 'detail': 'exact'}},
+            signals={'name': {'weight': WEIGHT_NAME, 'value': 1.0, 'detail': 'exact'}},
         )
         self.runner_up = AuthorClaim.objects.create(
             author=self.author, api_user=self.other, score=0.55, uuid='claim-2',
@@ -1045,8 +1403,16 @@ class AuthorClaimQueuePageTests(TestCase):
         )
         self.claim = AuthorClaim.objects.create(
             author=self.author, api_user=self.candidate, score=1.0, uuid='claim-1',
-            signals={'project': {'weight': 0.55, 'value': 1.0,
-                                 'detail': 'member of the publication project p-1'}},
+            signals={
+                'project': {'weight': WEIGHT_PROJECT, 'value': 1.0,
+                            'detail': 'member of the publication project p-1'},
+                'propagation': {'weight': WEIGHT_PROPAGATION, 'value': 1.0,
+                                'detail': 'also attributed on "Another paper", which '
+                                          'shares co-author Bob Bobson with this '
+                                          'publication'},
+                'scholar': {'weight': WEIGHT_SCHOLAR, 'value': 1.0,
+                            'detail': 'has a Google Scholar identifier on record'},
+            },
         )
 
     def as_user(self, is_admin=True):
@@ -1074,6 +1440,18 @@ class AuthorClaimQueuePageTests(TestCase):
         self.assertContains(response, 'member of the publication project p-1')
         self.assertContains(response, 'A paper')
         self.assertContains(response, 'csrfmiddlewaretoken')
+
+    def test_the_queue_renders_the_reason_for_each_v1_15_0_signal(self):
+        # The template iterates claim.signals generically, so a new signal renders
+        # without a template change -- which is exactly why it needs a test. For
+        # propagation the detail is load-bearing rather than decorative: once a
+        # propagated suggestion has been approved, nothing distinguishes a laundered
+        # machine inference from ground truth unless the admin could read where the
+        # boost came from before approving it.
+        response = self.get()
+        self.assertContains(response, 'shares co-author Bob Bobson with this publication')
+        self.assertContains(response, 'Another paper')
+        self.assertContains(response, 'has a Google Scholar identifier on record')
 
     def test_a_non_admin_sees_no_claims_and_no_buttons(self):
         response = self.get(is_admin=False)

@@ -33,6 +33,12 @@ class ApiUser(models.Model):
     cilogon_id = models.CharField(max_length=255, blank=True)
     email = models.CharField(max_length=255, blank=True)
     fabric_roles = ArrayField(models.CharField(max_length=255, blank=True), default=list)
+    # Google Scholar / Scopus identifiers, from core-api /core-api-metrics/people via
+    # sync_fabric_users (#32). Their *presence* is a small positive prior in author-claim
+    # scoring; the identifiers are not resolved to publication lists, which is a separate
+    # issue. Blank on almost everybody -- 8 of 3,311 hold a Scholar id and none a Scopus
+    # one -- so absence is read as no signal, never as a negative.
+    google_scholar = models.CharField(max_length=255, blank=True)
     # False on a row that only exists because the directory sync created it; set True
     # by the login path. Distinguishes "a FABRIC user" from "a user of this app".
     has_logged_in = models.BooleanField(default=False)
@@ -41,6 +47,7 @@ class ApiUser(models.Model):
     last_synced = models.DateTimeField(blank=True, null=True, default=None)
     name = models.CharField(max_length=255, blank=True)
     projects = ArrayField(models.CharField(max_length=255, blank=True), default=list)
+    scopus = models.CharField(max_length=255, blank=True)
     uuid = models.CharField(primary_key=False, max_length=255, blank=False, unique=True)
 
     @property

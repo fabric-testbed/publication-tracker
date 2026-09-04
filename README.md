@@ -159,6 +159,7 @@ cp env.template .env
 | `FABRIC_CREDENTIAL_MANAGER` | `https://cm.fabric-testbed.net/` | Credential Manager URL |
 | `FABRIC_PORTAL` | `https://portal.fabric-testbed.net` | FABRIC Portal base URL (used for project links) |
 | `FABRIC_CORE_API_TOKEN` | — | Read-only Core API service token used by the user sync. Server-to-server only |
+| `FABRIC_CORE_API_SERVICES_TOKEN` | — | `services`-class Core API token for the Scholar/Scopus pass. Disjoint from the readonly one above, not a superset — both are needed. Optional: the pass warns and skips without it |
 | `FABRIC_TOKEN_ISSUER` | *(unset)* | Expected `iss` on a FABRIC bearer token. Unset means unchecked; set to `fabric-core-api` once uis issues tokens with it |
 | `FABRIC_TOKEN_AUDIENCE` | *(unset)* | Expected `aud` on a FABRIC bearer token. Empty means the claim is not checked |
 | `FABRIC_HTTP_TIMEOUT_SECONDS` | `10` | Outbound timeout for calls made on the request path |
@@ -416,6 +417,22 @@ row and is advanced **only** when every window in a run succeeded; a window that
 could not be read aborts the run, because a watermark moved past people who were
 never read would hide them until the next full backfill.
 
+**The Scholar/Scopus pass.** After the windows are walked, a second pass reads
+`GET /core-api-metrics/people` — one unwindowed request for the whole population — and
+writes `ApiUser.google_scholar` and `.scopus`. Author-claim scoring reads those columns
+as a weak prior, which is why they are fetched here rather than at scoring time: a run of
+the scorer stays a pure local computation with no network call inside its loop.
+
+That endpoint needs the `services`-class token, which is a *different* credential from
+the readonly one: each answers 401 to the other's endpoint, so both live in `.env` and
+neither replaces the other. If `FABRIC_CORE_API_SERVICES_TOKEN` is absent the pass warns,
+skips, and leaves the two columns as they are — the directory sync itself is unaffected,
+which is deliberate, because a host whose `.env` lagged a restart must not lose its
+nightly directory refresh over a weak prior. A failed request is reported for the same
+reason rather than aborting the run. The pass does **not** stamp `last_synced`: that field
+means "the journey-tracker sync touched this row", and this endpoint returns everybody
+every time.
+
 **What the sync will not do.** It never deletes: `Publication.created_by` and
 `modified_by` are `SET_NULL`, so removing an `ApiUser` silently destroys publication
 provenance. Deactivated people are marked `active=False` and kept. It also never
@@ -461,18 +478,38 @@ field, written only by a self-claim, by an admin on the author edit form, or by 
 approval on the queue. That separation is what lets the whole queue be regenerated at
 will, and it means a scoring run has no user-visible effect at all.
 
-Two signals, both local, so a run makes no network calls:
+Four signals, all computed locally, so a run makes no network calls:
 
 | Signal | Weight | What it reads |
 |---|---|---|
-| Project co-membership | 0.55 | `Publication.project_uuid` against `ApiUser.projects` |
-| Name compatibility | 0.45 | The author string against `ApiUser.name` |
+| Project co-membership | 0.44 | `Publication.project_uuid` against `ApiUser.projects` |
+| Name compatibility | 0.36 | The author string against `ApiUser.name` |
+| Co-authorship propagation | 0.15 | Whether the candidate is already attributed on a publication that shares a person with this one |
+| Scholar/Scopus presence | 0.05 | Whether `ApiUser.google_scholar` or `.scopus` holds an identifier |
 
 Surname agreement is a **gate**, not a weight — without it every author pairs with every
 one of ~3,300 users. Absence is never read as disagreement: an initial where the other
 side has a full given name is missing information, not a mismatch, and ranks accordingly.
 Each suggestion stores its per-signal breakdown, which the queue displays, because a bare
 number is unreviewable.
+
+The last two signals arrived in v1.15.0 and neither of them reaches the network at
+scoring time. The Scholar and Scopus identifiers are columns on `ApiUser`, filled by the
+nightly user sync from core-api; propagation is computed from a co-authorship graph built
+once per run out of the `Author.fabric_uuid` values already in the database.
+
+**Propagation re-ranks candidates; it never creates one.** The run already scores every
+unclaimed author against every active user, so there is no pair for it to surface that has
+not been evaluated — and adjacency in the graph says nothing about *which* author string on
+a paper a person is, so using it to propose candidates would confidently suggest that
+`Papadimitriou, G.` is Jane Smith. Its weight is deliberately below `MIN_SCORE`, so a
+suggestion can be reordered by graph proximity but never qualified by it. That bound is
+what stops one wrong approval compounding across the corpus.
+
+Adding those two weights rescaled every score, so `MIN_SCORE` was scaled by the same
+factor (0.30 → 0.24) alongside the two original weights. A pair that gains neither new
+signal therefore keeps exactly the queue membership it had — which matters, because a
+suggestion that stops scoring is deleted rather than demoted.
 
 ### The queue
 
