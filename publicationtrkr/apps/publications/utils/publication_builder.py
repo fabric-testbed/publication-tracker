@@ -21,6 +21,7 @@ from django.db import transaction
 
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
+from publicationtrkr.apps.publications.utils.claim_ledger import withdraw_suggestions
 
 
 def _first_present(*values):
@@ -120,6 +121,12 @@ def _sync_authors(publication, author_names) -> list:
                 if author.author_name != author_name:
                     author.author_name = author_name
                     author.save(update_fields=['author_name'])
+                    # The claim suggestions for this row were scored against the old
+                    # spelling and are no longer about this author, so they are withdrawn
+                    # rather than left in the queue for up to a day until the next scoring
+                    # run recomputes them. Decisions are untouched -- withdraw_suggestions
+                    # only ever removes `suggested` rows.
+                    withdraw_suggestions(author)
                 new_author_uuids.append(author.uuid)
                 continue
             except Author.DoesNotExist:

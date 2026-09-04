@@ -32,6 +32,9 @@
             </li>
             {% if api_user.is_publication_tracker_admin %}
             <li class="nav-item">
+                <a class="nav-link" href={% url 'author_claim_list' %}>Author Claims</a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link" href={% url 'publication_bulk_upload' %}>Bulk Upload</a>
             </li>
             <li class="nav-item">

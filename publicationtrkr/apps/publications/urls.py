@@ -1,6 +1,7 @@
 from django.urls import path
 
 from publicationtrkr.apps.publications.views import (
+    author_claim_list,
     author_list,
     author_update,
     publication_author_detail,
@@ -19,6 +20,9 @@ urlpatterns = [
     # Ahead of the '<uuid>' pattern below, which would otherwise swallow it.
     path('bulk-upload', publication_bulk_upload, name='publication_bulk_upload'),
     path('authors/', author_list, name='author_list'),
+    # Ahead of nothing in particular -- 'authors/<uuid>/update' cannot match this -- but
+    # kept next to the list it belongs to.
+    path('authors/claims', author_claim_list, name='author_claim_list'),
     path('authors/<uuid>/update', author_update, name='author_update'),
     path('by-author-uuid/<fabric_uuid>', publication_author_detail, name='publication_author_detail'),
     path('projects/', publication_project_list, name='publication_project_list'),

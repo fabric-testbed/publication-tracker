@@ -30,14 +30,13 @@ Usage:
 """
 
 import os
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connection
 from django.utils.dateparse import parse_datetime
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
+from publicationtrkr.apps.apiuser.utils.locks import SYNC_ADVISORY_LOCK_KEY, advisory_lock
 from publicationtrkr.utils.core_api import (
     JOURNEY_TRACKER_MAX_WINDOW_DAYS,
     get_journey_tracker_people,
@@ -55,29 +54,12 @@ FULL_SYNC_EARLIEST = datetime(2020, 1, 1, tzinfo=timezone.utc)
 # idempotent upsert keyed on uuid.
 WATERMARK_OVERLAP = timedelta(hours=1)
 
-# Arbitrary but fixed key for pg_try_advisory_lock. Two syncs running concurrently --
-# the cron sidecar firing while an operator runs a backfill by hand -- would interleave
-# their watermark writes, and the loser's window would be recorded as covered when it
-# was not. The lock is held on this command's own database session and released when it
-# ends, including on a crash.
-SYNC_ADVISORY_LOCK_KEY = 823_100_023
+# The advisory lock and its key moved to apiuser/utils/locks.py, which records why each
+# key exists. score_author_claims (#32) needs the identical guard, and a copied locking
+# primitive is one that drifts apart silently.
 
 # Fields the sync owns. Everything else on ApiUser belongs to the login path.
 SYNCED_FIELDS = ('active', 'affiliation', 'email', 'fabric_roles', 'name', 'projects')
-
-
-@contextmanager
-def advisory_lock(key: int):
-    """Hold a Postgres session-level advisory lock, or yield False if another run has it."""
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT pg_try_advisory_lock(%s)', [key])
-        acquired = cursor.fetchone()[0]
-    try:
-        yield acquired
-    finally:
-        if acquired:
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT pg_advisory_unlock(%s)', [key])
 
 
 def iter_windows(start, end, newest_first: bool = False):

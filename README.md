@@ -18,6 +18,7 @@ A Django web application for tracking research publications that utilize [FABRIC
   - [Local Development](#local-development)
   - [Database Migrations](#database-migrations)
   - [FABRIC User Sync](#fabric-user-sync)
+- [Author Claims](#author-claims)
 - [Initial Setup](#initial-setup)
 - [Web Interface](#web-interface)
 - [REST API](#rest-api)
@@ -146,6 +147,9 @@ cp env.template .env
 | `USR_NAME` | `user_sync_check` | User Sync task name; its `value` holds the sync watermark |
 | `USR_DESCRIPTION` | `User Sync Check` | User Sync description |
 | `USR_TIMEOUT_IN_SECONDS` | `86400` | Intended sync cadence, consulted by `sync_fabric_users --if-due` |
+| `CLM_NAME` | `claim_scoring_check` | Author-claim scoring task name; its `value` holds the last run's timestamp |
+| `CLM_DESCRIPTION` | `Author Claim Scoring Check` | Author-claim scoring description |
+| `CLM_TIMEOUT_IN_SECONDS` | `86400` | Intended scoring cadence, consulted by `score_author_claims --if-due` |
 
 #### FABRIC Services
 
@@ -159,7 +163,8 @@ cp env.template .env
 | `FABRIC_TOKEN_AUDIENCE` | *(unset)* | Expected `aud` on a FABRIC bearer token. Empty means the claim is not checked |
 | `FABRIC_HTTP_TIMEOUT_SECONDS` | `10` | Outbound timeout for calls made on the request path |
 | `FABRIC_SYNC_HTTP_TIMEOUT_SECONDS` | `60` | Outbound timeout for the user sync, which runs off the request path |
-| `USER_SYNC_CRON_SCHEDULE` | `0 3 * * *` | Crontab schedule for the `pubtrkr-cron` sidecar |
+| `USER_SYNC_CRON_SCHEDULE` | `0 3 * * *` | Crontab schedule for the user sync in the `pubtrkr-cron` sidecar |
+| `CLAIM_SCORING_CRON_SCHEDULE` | `30 3 * * *` | Crontab schedule for author-claim scoring in the same sidecar |
 
 #### Vouch Proxy
 
@@ -443,6 +448,70 @@ by hand in local development.
 
 ---
 
+## Author Claims
+
+Linking an author on a paper to the FABRIC user who wrote it is ambiguous work:
+`Smith, J.`, `J. Smith` and `Jane Q. Smith` may or may not be the same person, which is
+why claiming has always been the honor system. Author-claim scoring keeps that
+self-service path exactly as it is and adds a second one: a nightly pass that *suggests*
+pairs, and an admin queue where a human decides.
+
+**Scoring never writes attribution.** `Author.fabric_uuid` stays the single authoritative
+field, written only by a self-claim, by an admin on the author edit form, or by an
+approval on the queue. That separation is what lets the whole queue be regenerated at
+will, and it means a scoring run has no user-visible effect at all.
+
+Two signals, both local, so a run makes no network calls:
+
+| Signal | Weight | What it reads |
+|---|---|---|
+| Project co-membership | 0.55 | `Publication.project_uuid` against `ApiUser.projects` |
+| Name compatibility | 0.45 | The author string against `ApiUser.name` |
+
+Surname agreement is a **gate**, not a weight — without it every author pairs with every
+one of ~3,300 users. Absence is never read as disagreement: an initial where the other
+side has a full given name is missing information, not a mismatch, and ranks accordingly.
+Each suggestion stores its per-signal breakdown, which the queue displays, because a bare
+number is unreviewable.
+
+### The queue
+
+`/publications/authors/claims`, admins only, also linked as **Author Claims** in the
+navbar. Suggestions are grouped by author and the best-scoring author comes first, so the
+high-confidence decisions are the ones you meet on page one.
+
+* **Approve** writes `Author.fabric_uuid`, stamps who decided and when, and withdraws that
+  author's other standing suggestions — attribution is settled, and leaving the runners-up
+  in the queue would invite overwriting it.
+* **Reject** records that the pair is not a match and changes no attribution. Rejections
+  are *kept*: they are the only thing that stops a pair being re-suggested every night.
+* An author already claimed by somebody else is refused rather than overwritten. Use the
+  author edit page to reassign one, where the current value is in front of you.
+
+The `Approved`, `Rejected` and `Self-asserted` tabs are the ledger of every decision,
+including the self-claims made through the ordinary path and the attributions admins type
+into the author form.
+
+### Schedule
+
+The same `pubtrkr-cron` sidecar runs scoring on `CLAIM_SCORING_CRON_SCHEDULE`, half an
+hour after the user sync by default. That order matters: the strongest signal reads
+`ApiUser.projects`, so a run that went first would score against yesterday's directory.
+
+```bash
+# Preview, then run, from the sidecar (it sources .env, which `docker exec` does not)
+docker exec pubtrkr-cron /code/scripts/run-claim-scoring.sh --dry-run
+docker exec pubtrkr-cron /code/scripts/run-claim-scoring.sh
+```
+
+Useful flags: `--dry-run` reports without writing, `--full` rescores every author
+including claimed ones, and `--if-due` exits unless `CLM_TIMEOUT_IN_SECONDS` has elapsed
+(for a sidecar firing more often than the cadence — the shipped schedule fires exactly on
+it, so the crontab entry does not use it). Two runs cannot collide: the command takes a
+Postgres advisory lock, which holds across containers.
+
+---
+
 ## Initial Setup
 
 After the database is up, run these once to initialize required records:
@@ -458,6 +527,11 @@ python manage.py init_task_timeout_tracker
 # Preview it first; see "FABRIC User Sync" for what this does and does not touch.
 python manage.py sync_fabric_users --full --dry-run
 python manage.py sync_fabric_users --full
+
+# First author-claim scoring pass, which fills the admin queue. Preview it first;
+# see "Author Claims" for what it does and does not touch.
+python manage.py score_author_claims --dry-run
+python manage.py score_author_claims
 ```
 
 ## Web Interface
@@ -473,6 +547,7 @@ All pages are accessible at `https://<host>:8443/`.
 | `/publications/<uuid>/update` | Owner, Admins | Edit publication fields |
 | `/publications/authors/` | All | Browse all authors; "FABRIC linked" column shows claimed status |
 | `/publications/authors/<uuid>/update` | Creators, Admins | Edit author display name and claim |
+| `/publications/authors/claims` | Admins only | Review scored author-claim suggestions; approve or reject |
 | `/publications/by-author-uuid/<fabric_uuid>` | All | All publications by a specific FABRIC user |
 | `/publications/projects/` | All | Publications grouped by FABRIC project (name, count, link) |
 | `/publications/projects/<project_uuid>` | All | All publications for a specific project |
@@ -506,6 +581,9 @@ Authors listed on a publication can "claim" their entry to link their FABRIC ide
 2. Find your name — the **FABRIC linked** column shows `Yes` (linked) or `No` (unclaimed).
 3. Click **Edit** to set your display name and associate your FABRIC UUID.
 4. Once claimed, your name on any publication list becomes a link to all your publications.
+
+Claiming stays immediate and needs nobody's approval. Admins additionally get a queue of
+scored suggestions for authors nobody has claimed — see "Author Claims" above.
 
 ---
 
@@ -739,6 +817,10 @@ publication-tracker/
 │   └── docker-compose.yml.prod-ssl    # Alternate compose for production SSL
 ├── Dockerfile                    # Django container image (python:3 + uv)
 ├── docker-entrypoint.sh          # Container startup script
+├── docker-entrypoint-cron.sh     # Cron sidecar startup; writes the /etc/cron.d entries
+├── scripts/
+│   ├── run-user-sync.sh          # Cron wrapper for sync_fabric_users
+│   └── run-claim-scoring.sh      # Cron wrapper for score_author_claims
 ├── run_server.sh                 # Server launcher (local-dev / local-ssl / docker)
 ├── pyproject.toml                # Python dependencies (requires 3.12+)
 ├── publicationtrkr.ini           # uWSGI configuration
@@ -767,7 +849,7 @@ publication-tracker/
     │   │       ├── init_anon_api_user.py
     │   │       └── init_task_timeout_tracker.py
     │   └── publications/         # Full publication tracking (BibTeX)
-    │       ├── models.py         # Publication, Author
+    │       ├── models.py         # Publication, Author, AuthorClaim
     │       ├── views.py          # publication_*, author_*
     │       ├── tests.py
     │       ├── urls.py

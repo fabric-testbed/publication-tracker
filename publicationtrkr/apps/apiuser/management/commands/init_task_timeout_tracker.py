@@ -6,11 +6,29 @@ from django.core.management.base import BaseCommand, CommandError
 
 from publicationtrkr.apps.apiuser.models import TaskTimeoutTracker
 
-# (name, description, timeout) environment keys for each tracked task
+# (name, description, timeout) environment keys for each tracked task, each with the
+# default to use when the variable is absent.
+#
+# The defaults are not decoration. Until 1.12.0 these were read with a bare
+# `int(os.getenv(...))`, so a deployment that had not yet added the USR_* triple to its
+# .env crashed this function on every boot -- the 1.12.0 deploy hazard. A new tracker
+# must not be able to repeat that, so CLM_* ships with working defaults and the .env
+# addition is optional. Existing keys keep their current values as defaults, which is
+# a no-op where they are set and a repair where they are not.
 TRACKERS = (
-    ('PSK_NAME', 'PSK_DESCRIPTION', 'PSK_TIMEOUT_IN_SECONDS'),
-    ('TRL_NAME', 'TRL_DESCRIPTION', 'TRL_TIMEOUT_IN_SECONDS'),
-    ('USR_NAME', 'USR_DESCRIPTION', 'USR_TIMEOUT_IN_SECONDS'),
+    ('PSK_NAME', 'public_signing_key',
+     'PSK_DESCRIPTION', 'Public Signing Key',
+     'PSK_TIMEOUT_IN_SECONDS', 86400),
+    ('TRL_NAME', 'token_revocation_list',
+     'TRL_DESCRIPTION', 'Token Revocation List',
+     'TRL_TIMEOUT_IN_SECONDS', 300),
+    ('USR_NAME', 'user_sync_check',
+     'USR_DESCRIPTION', 'User Sync Check',
+     'USR_TIMEOUT_IN_SECONDS', 86400),
+    # Author-claim scoring (#32). 24h, matching the user sync it runs after.
+    ('CLM_NAME', 'claim_scoring_check',
+     'CLM_DESCRIPTION', 'Author Claim Scoring Check',
+     'CLM_TIMEOUT_IN_SECONDS', 86400),
 )
 
 
@@ -20,6 +38,7 @@ def init_task_timeout_tracker():
     - public_signing_key
     - token_revocation_list
     - user_sync_check
+    - claim_scoring_check
 
     ARC / author_refresh_check is deliberately gone: it was scaffolding for an
     abandoned earlier attempt at user sync, initialized on every boot and read by
@@ -33,14 +52,16 @@ def init_task_timeout_tracker():
     """
     try:
         now = datetime.now(timezone.utc)
-        for name_key, description_key, timeout_key in TRACKERS:
-            timeout_in_seconds = int(os.getenv(timeout_key))
+        for (name_key, name_default,
+             description_key, description_default,
+             timeout_key, timeout_default) in TRACKERS:
+            timeout_in_seconds = int(os.getenv(timeout_key) or timeout_default)
             shared = {
-                'description': os.getenv(description_key),
+                'description': os.getenv(description_key) or description_default,
                 'timeout_in_seconds': timeout_in_seconds,
             }
             TaskTimeoutTracker.objects.update_or_create(
-                name=os.getenv(name_key),
+                name=os.getenv(name_key) or name_default,
                 defaults=shared,
                 create_defaults={
                     **shared,

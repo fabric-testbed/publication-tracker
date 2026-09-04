@@ -1,0 +1,230 @@
+{% extends 'base.html' %}
+{% load static publications_tags django_bootstrap5 %}
+{% block title %}
+    FABRIC Publication Tracker
+{% endblock %}
+
+{% block content %}
+    {% if message %}
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-exclamation me-2"></i>
+            {{ message }}
+        </div>
+    {% endif %}
+    {% if notice %}
+        <div class="alert alert-success d-flex align-items-center" role="alert">
+            <i class="fa fa-circle-check me-2"></i>
+            {{ notice }}
+        </div>
+    {% endif %}
+    <div class="container w-85">
+        <div class="page-header">
+            <h2>Author Claims</h2>
+            <span class="subtitle">
+                Scored suggestions linking publication authors to FABRIC users. Approving
+                one sets the author's FABRIC user; nothing here changes attribution until
+                you do.
+            </span>
+        </div>
+
+        {% if api_user.is_publication_tracker_admin %}
+            <ul class="nav nav-pills mb-3">
+                {% for value, label in tabs %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if status == value %}active{% endif %}"
+                           href="?status={{ value }}">{{ label }}</a>
+                    </li>
+                {% endfor %}
+            </ul>
+
+            {% for group in groups %}
+                <div class="detail-card">
+                    <div class="card-header">
+                        <strong>{{ group.author.author_name }}</strong>
+                        {% if group.author.fabric_uuid %}
+                            <span class="pub-badge pub-badge-project ms-2">
+                                <i class="fa fa-link me-1"></i>claimed
+                            </span>
+                        {% endif %}
+                        <a class="btn btn-outline-primary btn-sm float-end"
+                           href="{% url 'author_update' uuid=group.author.uuid %}"
+                           title="Edit this author record"
+                           data-bs-toggle="tooltip" data-bs-placement="left">
+                            <i class="fa fa-pen-to-square me-1"></i> Edit author
+                        </a>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Publication</div>
+                        <div class="detail-value">
+                            {% if group.publication %}
+                                <a href="{% url 'publication_detail' uuid=group.publication.uuid %}"
+                                   title="View the associated publication"
+                                   data-bs-toggle="tooltip" data-bs-placement="top">
+                                    {{ group.publication.title }}
+                                </a>
+                                <span class="text-muted">({{ group.publication.year }})</span>
+                                {% if group.publication.project_name %}
+                                    <br>
+                                    <span class="pub-meta-label">Project:</span>
+                                    {{ group.publication.project_name }}
+                                {% endif %}
+                            {% else %}
+                                <em class="text-muted">{{ group.author.publication_uuid }}</em>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <table class="soft-table mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 90px;">Score</th>
+                                <th>Candidate FABRIC User</th>
+                                <th>Why</th>
+                                <th style="width: 190px;">
+                                    {% if status == 'suggested' %}Decision{% else %}Decided{% endif %}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for claim in group.claims %}
+                            <tr>
+                                <td>
+                                    {% if claim.score >= 0.8 %}
+                                        <span class="pub-badge pub-badge-project">{% widthratio claim.score 1 100 %}%</span>
+                                    {% else %}
+                                        <span class="pub-badge">{% widthratio claim.score 1 100 %}%</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <strong>{{ claim.api_user.name }}</strong>
+                                    {% if claim.api_user.email %}
+                                        <br><span class="sm-font text-muted">{{ claim.api_user.email }}</span>
+                                    {% endif %}
+                                    {% if claim.api_user.affiliation %}
+                                        <br><span class="sm-font text-muted">{{ claim.api_user.affiliation }}</span>
+                                    {% endif %}
+                                    <br>
+                                    <a class="sm-font"
+                                       href="{% url 'publication_author_detail' fabric_uuid=claim.api_user.uuid %}"
+                                       title="View all publications already attributed to this FABRIC user"
+                                       data-bs-toggle="tooltip" data-bs-placement="top">
+                                        other publications
+                                    </a>
+                                </td>
+                                <td>
+                                    {% for name, signal in claim.signals.items %}
+                                        <div class="sm-font">
+                                            <span class="pub-meta-label">{{ name }}</span>
+                                            <span class="text-muted">
+                                                ({{ signal.weight }} &times; {{ signal.value }})
+                                            </span>
+                                            {{ signal.detail }}
+                                        </div>
+                                    {% empty %}
+                                        <span class="sm-font text-muted">
+                                            {% if claim.source == 'self' %}
+                                                claimed by this user
+                                            {% elif claim.source == 'admin' %}
+                                                entered by an admin
+                                            {% else %}
+                                                no signal breakdown recorded
+                                            {% endif %}
+                                        </span>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    {% if claim.is_decided %}
+                                        <span class="sm-font text-muted">
+                                            {{ claim.get_status_display }}
+                                            {% if claim.decided_at %}
+                                                {# A model datetime, not the stringified
+                                                   one an as_dict() carries, so the
+                                                   builtin date filter rather than
+                                                   normalize_date_to_utc -- that one takes
+                                                   len() of its argument. TIME_ZONE is
+                                                   UTC. #}
+                                                <br>{{ claim.decided_at|date:"Y-m-d H:i" }} UTC
+                                            {% endif %}
+                                            {% if claim.decided_by %}
+                                                <br>by {{ claim.decided_by.name|default:claim.decided_by.uuid }}
+                                            {% endif %}
+                                        </span>
+                                    {% else %}
+                                        <div class="action-row d-flex flex-row gap-2">
+                                            <form method="post" action="{{ request.get_full_path }}">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="claim_uuid" value="{{ claim.uuid }}">
+                                                <input type="hidden" name="action" value="approve">
+                                                <button type="submit" class="btn btn-outline-success btn-sm"
+                                                        title="Attribute this author to {{ claim.api_user.name }}"
+                                                        data-bs-toggle="tooltip" data-bs-placement="top">
+                                                    <i class="fa fa-check me-1"></i> Approve
+                                                </button>
+                                            </form>
+                                            <form method="post" action="{{ request.get_full_path }}">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="claim_uuid" value="{{ claim.uuid }}">
+                                                <input type="hidden" name="action" value="reject">
+                                                <button type="submit" class="btn btn-outline-danger btn-sm"
+                                                        title="Record that this pair is not a match"
+                                                        data-bs-toggle="tooltip" data-bs-placement="top">
+                                                    <i class="fa fa-xmark me-1"></i> Reject
+                                                </button>
+                                            </form>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% empty %}
+                <div class="empty-state">
+                    <i class="fa fa-user-check fa-2x"></i>
+                    {% if status == 'suggested' %}
+                        No suggestions to review. The nightly scoring run adds them as
+                        publications and FABRIC users change.
+                    {% else %}
+                        No {{ status }} claims recorded.
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            <div class="pagination-bar d-flex flex-row align-items-center justify-content-between">
+                {% if prev_page %}
+                    <a href="?status={{ status }}&page={{ prev_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ prev_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="left">
+                        <i class="fa fa-angles-left me-1"></i> Page {{ prev_page }}
+                    </a>
+                {% else %}
+                    <span class="btn btn-outline-secondary btn-sm disabled">
+                        <i class="fa fa-angles-left"></i>
+                    </span>
+                {% endif %}
+
+                <span class="results-count">{{ item_range }} of {{ count }} authors</span>
+
+                {% if next_page %}
+                    <a href="?status={{ status }}&page={{ next_page }}"
+                       class="btn btn-outline-primary btn-sm"
+                       title="Go to page {{ next_page }}"
+                       data-bs-toggle="tooltip" data-bs-placement="right">
+                        Page {{ next_page }} <i class="fa fa-angles-right ms-1"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-outline-secondary btn-sm disabled">
+                        <i class="fa fa-angles-right"></i>
+                    </span>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    {% if debug %}
+        <hr>
+        <pre><strong>groups</strong>:<br>{{ groups|pprint }}</pre>
+        <pre><strong>api_user</strong>:<br>{{ api_user|pprint }}</pre>
+        <br>
+    {% endif %}
+{% endblock %}

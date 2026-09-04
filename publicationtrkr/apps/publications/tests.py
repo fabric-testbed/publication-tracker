@@ -8,23 +8,36 @@ a rejected publication from leaving its Author rows behind. Production accumulat
 19 such orphans before this existed, so the orphan test is the one that matters most.
 """
 
+from io import StringIO
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.db import IntegrityError
 from django.http import QueryDict
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 from rest_framework.exceptions import PermissionDenied
 
-from publicationtrkr.apps.apiuser.models import ApiUser
+from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
 from publicationtrkr.apps.publications.api.serializers import PublicationSerializer
 from publicationtrkr.apps.publications.api.viewsets import (
     PublicationViewSet,
     memoized_project_name_resolver,
 )
 from publicationtrkr.apps.publications.forms import PublicationForm
-from publicationtrkr.apps.publications.models import Author, Publication
+from publicationtrkr.apps.publications.models import Author, AuthorClaim, Publication
+from publicationtrkr.apps.publications.utils.claim_scoring import (
+    WEIGHT_NAME,
+    candidates_for_author,
+    score_pair,
+)
+from publicationtrkr.apps.publications.utils.name_matching import (
+    FULL_VS_INITIAL,
+    name_compatibility,
+    parse_name,
+)
 from publicationtrkr.apps.publications.utils.bibtex_utils import (
     generate_bibtex,
     parse_bibtex,
@@ -35,7 +48,15 @@ from publicationtrkr.apps.publications.utils.bulk_ingest import (
     collect_records,
     ingest,
 )
+from publicationtrkr.apps.publications.utils.claim_ledger import (
+    ClaimDecisionError,
+    approve_suggestion,
+    record_admin_claim,
+    record_self_claim,
+    reject_suggestion,
+)
 from publicationtrkr.apps.publications.utils.publication_builder import (
+    _sync_authors,
     create_publication,
     resolve_create_fields,
     resolve_update_fields,
@@ -645,3 +666,564 @@ class BulkUploadPageTests(TestCase):
         response = self.post(upload('p.jsonl', JSONL_GOOD), is_admin=False)
         self.assertContains(response, 'PermissionDenied')
         self.assertEqual(Publication.objects.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# Author-claim scoring (issue #32, v1.14.0)
+# ---------------------------------------------------------------------------
+
+
+class NameMatchingTests(SimpleTestCase):
+    """
+    The ambiguity this exists to score, using the issue's own examples.
+
+    Surname agreement is the gate that keeps the queue finite, so the tests that matter
+    most are the ones asserting a non-match: without them every author pairs with every
+    one of 3,300 users.
+    """
+
+    def test_both_name_orders_parse_to_the_same_person(self):
+        self.assertEqual(parse_name('Smith, Jane'), parse_name('Jane Smith'))
+
+    def test_surname_particles_stay_with_the_surname_in_either_order(self):
+        self.assertEqual(
+            parse_name('van der Berg, Anna')['surname'],
+            parse_name('Anna van der Berg')['surname'],
+        )
+
+    def test_diacritics_and_case_fold(self):
+        score, _, matched = name_compatibility('Muñoz, José', 'Jose Munoz')
+        self.assertTrue(matched)
+        self.assertEqual(score, 1.0)
+
+    def test_suffix_is_not_mistaken_for_a_name(self):
+        self.assertEqual(parse_name('Smith, Jane Q., Jr.')['given'], 'jane')
+
+    def test_initial_is_consistent_with_a_full_given_name(self):
+        score, detail, matched = name_compatibility('Smith, J.', 'Jane Smith')
+        self.assertTrue(matched)
+        self.assertEqual(score, FULL_VS_INITIAL)
+        self.assertIn('jane', detail)
+
+    def test_conflicting_given_names_score_zero_but_still_match_on_surname(self):
+        # Deliberately still a candidate: the paper's author string may be wrong, and the
+        # admin sees the conflict spelled out. It just must not outrank a real match.
+        score, detail, matched = name_compatibility('Smith, Jane', 'John Smith')
+        self.assertTrue(matched)
+        self.assertEqual(score, 0.0)
+        self.assertIn('differ', detail)
+
+    def test_different_surnames_are_not_candidates_at_all(self):
+        _, _, matched = name_compatibility('Smith, J.', 'Jane Okonkwo')
+        self.assertFalse(matched)
+
+    def test_surname_component_match_is_whole_component_only(self):
+        # 'son' must not match 'johnson', or every short surname matches half the world.
+        _, _, matched = name_compatibility('Son, A.', 'Alice Johnson')
+        self.assertFalse(matched)
+
+    def test_hyphenated_surname_matches_either_component(self):
+        _, _, matched = name_compatibility('Smith-Okonkwo, J.', 'Jane Smith')
+        self.assertTrue(matched)
+
+
+class ClaimScoringTests(SimpleTestCase):
+    """The weighting, exercised without a database."""
+
+    class _User:
+        def __init__(self, name, projects, uuid='u-1'):
+            self.name = name
+            self.projects = projects
+            self.uuid = uuid
+
+    class _Author:
+        def __init__(self, author_name):
+            self.author_name = author_name
+
+    class _Publication:
+        def __init__(self, project_uuid):
+            self.project_uuid = project_uuid
+
+    def test_exact_name_in_the_same_project_is_full_confidence(self):
+        result = score_pair(
+            self._Author('Smith, Jane'),
+            self._User('Jane Smith', ['p-1']),
+            self._Publication('p-1'),
+        )
+        self.assertEqual(result['score'], 1.0)
+
+    def test_project_membership_outweighs_a_bare_initial(self):
+        with_project = score_pair(
+            self._Author('Smith, J.'), self._User('Jane Smith', ['p-1']),
+            self._Publication('p-1'))
+        without = score_pair(
+            self._Author('Smith, J.'), self._User('Jane Smith', ['p-2']),
+            self._Publication('p-1'))
+        self.assertGreater(with_project['score'], without['score'])
+
+    def test_a_publication_with_no_project_is_no_signal_not_a_penalty(self):
+        result = score_pair(
+            self._Author('Smith, Jane'), self._User('Jane Smith', []), None)
+        self.assertEqual(result['signals']['project']['value'], 0.0)
+        self.assertIn('no project', result['signals']['project']['detail'])
+        # The name still carries its full weight.
+        self.assertEqual(result['score'], WEIGHT_NAME)
+
+    def test_a_different_surname_is_not_scored_at_all(self):
+        self.assertIsNone(score_pair(
+            self._Author('Smith, J.'), self._User('Jane Okonkwo', ['p-1']),
+            self._Publication('p-1')))
+
+    def test_every_suggestion_carries_a_reason_for_each_signal(self):
+        # A score with no breakdown is unreviewable, which is the whole design.
+        result = score_pair(
+            self._Author('Smith, J.'), self._User('Jane Smith', ['p-1']),
+            self._Publication('p-1'))
+        for signal in ('project', 'name'):
+            self.assertTrue(result['signals'][signal]['detail'])
+
+    def test_candidates_come_back_best_first(self):
+        author = self._Author('Smith, J.')
+        publication = self._Publication('p-1')
+        users = [
+            self._User('Jane Smith', [], uuid='no-project'),
+            self._User('Jane Smith', ['p-1'], uuid='in-project'),
+        ]
+        ranked = candidates_for_author(author, users, publication)
+        self.assertEqual([u.uuid for _, u, _ in ranked], ['in-project', 'no-project'])
+
+
+class ScoreAuthorClaimsCommandTests(TestCase):
+    """
+    The command's contract: it suggests, and it never decides.
+    """
+
+    def setUp(self):
+        self.publication = Publication.objects.create(
+            authors=['Smith, Jane'], project_uuid='p-1', title='A paper',
+            uuid='pub-1', year='2026',
+        )
+        self.author = Author.objects.create(
+            author_name='Smith, Jane', display_name='Smith, Jane',
+            publication_uuid='pub-1', uuid='auth-1',
+        )
+        self.api_user = ApiUser.objects.create(
+            uuid='user-1', name='Jane Smith', projects=['p-1'], active=True)
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command('score_author_claims', *args, stdout=out)
+        return out.getvalue()
+
+    def test_a_dry_run_writes_nothing(self):
+        output = self._run('--dry-run')
+        self.assertIn('DRY RUN', output)
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+
+    def test_scoring_creates_a_suggestion_and_leaves_attribution_alone(self):
+        self._run()
+        claim = AuthorClaim.objects.get()
+        self.assertEqual(claim.status, AuthorClaim.SUGGESTED)
+        self.assertEqual(claim.source, AuthorClaim.MACHINE)
+        self.assertEqual(claim.score, 1.0)
+        self.author.refresh_from_db()
+        self.assertIsNone(self.author.fabric_uuid)
+
+    def test_rerunning_updates_in_place_rather_than_duplicating(self):
+        self._run()
+        self._run()
+        self.assertEqual(AuthorClaim.objects.count(), 1)
+
+    def test_a_rejected_pair_is_never_re_suggested(self):
+        AuthorClaim.objects.create(
+            author=self.author, api_user=self.api_user, score=0.0, signals={},
+            source=AuthorClaim.MACHINE, status=AuthorClaim.REJECTED, uuid='claim-r',
+        )
+        output = self._run()
+        claim = AuthorClaim.objects.get()
+        self.assertEqual(claim.status, AuthorClaim.REJECTED)
+        self.assertEqual(claim.score, 0.0)
+        self.assertIn('Left decided       : 1', output)
+
+    def test_an_approved_pair_is_left_exactly_as_it_is(self):
+        AuthorClaim.objects.create(
+            author=self.author, api_user=self.api_user, score=0.9, signals={},
+            source=AuthorClaim.MACHINE, status=AuthorClaim.APPROVED, uuid='claim-a',
+        )
+        self._run()
+        claim = AuthorClaim.objects.get()
+        self.assertEqual(claim.status, AuthorClaim.APPROVED)
+        self.assertEqual(claim.score, 0.9)
+
+    def test_claimed_authors_are_skipped_unless_full(self):
+        self.author.fabric_uuid = 'user-1'
+        self.author.save()
+        self._run()
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+        self._run('--full')
+        self.assertEqual(AuthorClaim.objects.count(), 1)
+
+    def test_inactive_users_are_not_suggested(self):
+        self.api_user.active = False
+        self.api_user.save()
+        self._run()
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+
+    def test_a_stale_suggestion_is_withdrawn_when_it_stops_scoring(self):
+        self._run()
+        self.assertEqual(AuthorClaim.objects.count(), 1)
+        # A rename through the API path should not leave the old spelling's suggestions.
+        self.author.author_name = 'Okonkwo, Jane'
+        self.author.save()
+        output = self._run()
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+        self.assertIn('Withdrawn (stale)  : 1', output)
+
+    def test_if_due_is_a_noop_before_the_cadence_elapses(self):
+        TaskTimeoutTracker.objects.create(
+            description='Author Claim Scoring Check', last_updated=timezone.now(),
+            name='claim_scoring_check', timeout_in_seconds=86400,
+            uuid='trk-1', value=None,
+        )
+        output = self._run('--if-due')
+        self.assertIn('Not due', output)
+        self.assertEqual(AuthorClaim.objects.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# The claim ledger and the admin queue (issue #32, v1.14.0)
+# ---------------------------------------------------------------------------
+
+
+class ClaimLedgerTests(TestCase):
+    """
+    The rules every decision path has to agree on: attribution is written once, other
+    standing suggestions go, and no decision is ever removed by code.
+    """
+
+    def setUp(self):
+        self.author = Author.objects.create(
+            author_name='Smith, Jane', display_name='Smith, Jane',
+            publication_uuid='pub-1', uuid='auth-1',
+        )
+        self.jane = ApiUser.objects.create(uuid='user-1', name='Jane Smith')
+        self.other = ApiUser.objects.create(uuid='user-2', name='John Smith')
+        self.admin = ApiUser.objects.create(uuid='admin-1', name='An Admin')
+        self.claim = AuthorClaim.objects.create(
+            author=self.author, api_user=self.jane, score=1.0, uuid='claim-1',
+            signals={'name': {'weight': 0.45, 'value': 1.0, 'detail': 'exact'}},
+        )
+        self.runner_up = AuthorClaim.objects.create(
+            author=self.author, api_user=self.other, score=0.55, uuid='claim-2',
+        )
+
+    def test_approving_writes_attribution_and_stamps_the_decision(self):
+        approve_suggestion(self.claim, decided_by=self.admin)
+        self.author.refresh_from_db()
+        self.claim.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-1')
+        self.assertEqual(self.claim.status, AuthorClaim.APPROVED)
+        self.assertEqual(self.claim.decided_by, self.admin)
+        self.assertIsNotNone(self.claim.decided_at)
+
+    def test_approving_withdraws_the_other_suggestions_for_that_author(self):
+        withdrawn = approve_suggestion(self.claim, decided_by=self.admin)
+        self.assertEqual(withdrawn, 1)
+        self.assertFalse(AuthorClaim.objects.filter(uuid='claim-2').exists())
+        self.assertTrue(AuthorClaim.objects.filter(uuid='claim-1').exists())
+
+    def test_approving_keeps_the_signals_that_justified_it(self):
+        approve_suggestion(self.claim, decided_by=self.admin)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.signals['name']['value'], 1.0)
+
+    def test_an_author_claimed_by_someone_else_is_refused_not_overwritten(self):
+        self.author.fabric_uuid = 'user-99'
+        self.author.save()
+        with self.assertRaises(ClaimDecisionError):
+            approve_suggestion(self.claim, decided_by=self.admin)
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-99')
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.SUGGESTED)
+
+    def test_approving_an_already_decided_claim_is_refused(self):
+        approve_suggestion(self.claim, decided_by=self.admin)
+        with self.assertRaises(ClaimDecisionError):
+            approve_suggestion(self.claim, decided_by=self.admin)
+
+    def test_rejecting_keeps_the_row_and_leaves_attribution_alone(self):
+        reject_suggestion(self.claim, decided_by=self.admin)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.REJECTED)
+        self.author.refresh_from_db()
+        self.assertIsNone(self.author.fabric_uuid)
+
+    def test_rejecting_leaves_the_other_suggestions_in_the_queue(self):
+        reject_suggestion(self.claim, decided_by=self.admin)
+        self.assertTrue(AuthorClaim.objects.filter(uuid='claim-2').exists())
+
+    def test_withdrawal_never_touches_a_decided_row(self):
+        reject_suggestion(self.runner_up, decided_by=self.admin)
+        approve_suggestion(self.claim, decided_by=self.admin)
+        self.runner_up.refresh_from_db()
+        self.assertEqual(self.runner_up.status, AuthorClaim.REJECTED)
+
+    def test_a_self_claim_promotes_the_standing_suggestion_for_that_pair(self):
+        record_self_claim(self.author, self.jane)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.SELF_ASSERTED)
+        self.assertEqual(self.claim.source, AuthorClaim.SELF)
+        self.assertEqual(self.claim.decided_by, self.jane)
+        # ...and the pair it was competing with is withdrawn.
+        self.assertFalse(AuthorClaim.objects.filter(uuid='claim-2').exists())
+
+    def test_a_self_claim_with_no_suggestion_records_one_anyway(self):
+        author = Author.objects.create(
+            author_name='Nobody, N', display_name='Nobody, N',
+            publication_uuid='pub-1', uuid='auth-2',
+        )
+        claim = record_self_claim(author, self.jane)
+        self.assertEqual(claim.status, AuthorClaim.SELF_ASSERTED)
+        self.assertIsNotNone(claim.uuid)
+
+    def test_an_admin_entered_uuid_is_recorded_as_an_admin_approval(self):
+        claim = record_admin_claim(self.author, 'user-2', decided_by=self.admin)
+        self.assertEqual(claim.status, AuthorClaim.APPROVED)
+        self.assertEqual(claim.source, AuthorClaim.ADMIN)
+        self.assertEqual(claim.decided_by, self.admin)
+
+    def test_an_admin_entered_uuid_naming_no_api_user_records_nothing(self):
+        self.assertIsNone(record_admin_claim(self.author, 'not-a-user', decided_by=self.admin))
+        self.assertEqual(AuthorClaim.objects.filter(status=AuthorClaim.APPROVED).count(), 0)
+
+    def test_clearing_an_attribution_leaves_the_previous_decision_in_place(self):
+        record_admin_claim(self.author, 'user-1', decided_by=self.admin)
+        self.assertIsNone(record_admin_claim(self.author, '', decided_by=self.admin))
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.APPROVED)
+
+    def test_a_rename_through_the_api_path_withdraws_the_suggestions(self):
+        publication = Publication.objects.create(
+            authors=[self.author.uuid], title='A paper', uuid='pub-1', year='2026',
+        )
+        _sync_authors(publication, ['Okonkwo, Jane'])
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.author_name, 'Okonkwo, Jane')
+        self.assertEqual(AuthorClaim.objects.filter(author=self.author).count(), 0)
+
+    def test_a_rename_leaves_a_decided_row_alone(self):
+        reject_suggestion(self.claim, decided_by=self.admin)
+        publication = Publication.objects.create(
+            authors=[self.author.uuid], title='A paper', uuid='pub-1', year='2026',
+        )
+        _sync_authors(publication, ['Okonkwo, Jane'])
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.REJECTED)
+
+
+class AuthorClaimQueuePageTests(TestCase):
+    """
+    /publications/authors/claims end to end, through the real URL conf and the real
+    template. Nothing else renders this template, and a template error only happens at
+    render time.
+    """
+
+    def setUp(self):
+        self.api_user = ApiUser.objects.create(uuid='admin-1', name='An Admin')
+        self.candidate = ApiUser.objects.create(
+            uuid='user-1', name='Jane Smith', email='jane@example.edu',
+            affiliation='Example University',
+        )
+        self.publication = Publication.objects.create(
+            authors=['auth-1'], project_name='A Project', project_uuid='p-1',
+            title='A paper', uuid='pub-1', year='2026',
+        )
+        self.author = Author.objects.create(
+            author_name='Smith, Jane', display_name='Smith, Jane',
+            publication_uuid='pub-1', uuid='auth-1',
+        )
+        self.claim = AuthorClaim.objects.create(
+            author=self.author, api_user=self.candidate, score=1.0, uuid='claim-1',
+            signals={'project': {'weight': 0.55, 'value': 1.0,
+                                 'detail': 'member of the publication project p-1'}},
+        )
+
+    def as_user(self, is_admin=True):
+        return (
+            mock.patch('publicationtrkr.apps.publications.views.get_api_user',
+                       return_value=self.api_user),
+            mock.patch.object(ApiUser, 'is_publication_tracker_admin', is_admin),
+        )
+
+    def get(self, query='', is_admin=True):
+        patches = self.as_user(is_admin)
+        with patches[0], patches[1]:
+            return self.client.get('/publications/authors/claims' + query)
+
+    def post(self, data, is_admin=True):
+        patches = self.as_user(is_admin)
+        with patches[0], patches[1]:
+            return self.client.post('/publications/authors/claims', data)
+
+    def test_the_queue_renders_a_suggestion_with_its_reasons(self):
+        response = self.get()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Smith, Jane')
+        self.assertContains(response, 'Jane Smith')
+        self.assertContains(response, 'member of the publication project p-1')
+        self.assertContains(response, 'A paper')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+
+    def test_a_non_admin_sees_no_claims_and_no_buttons(self):
+        response = self.get(is_admin=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'PermissionDenied')
+        self.assertNotContains(response, 'csrfmiddlewaretoken')
+        self.assertNotContains(response, 'Jane Smith')
+
+    def test_approving_from_the_page_writes_the_attribution(self):
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'approve'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Approved')
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-1')
+
+    def test_rejecting_from_the_page_records_it_and_changes_no_attribution(self):
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'reject'})
+        self.assertContains(response, 'Rejected')
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.REJECTED)
+        self.author.refresh_from_db()
+        self.assertIsNone(self.author.fabric_uuid)
+
+    def test_a_non_admin_post_writes_nothing(self):
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'approve'}, is_admin=False)
+        self.assertContains(response, 'PermissionDenied')
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.SUGGESTED)
+        self.author.refresh_from_db()
+        self.assertIsNone(self.author.fabric_uuid)
+
+    def test_re_posting_the_same_decision_says_so_rather_than_deciding_twice(self):
+        self.post({'claim_uuid': 'claim-1', 'action': 'approve'})
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'approve'})
+        self.assertContains(response, 'already approved')
+
+    def test_approving_an_author_someone_else_holds_is_refused_on_the_page(self):
+        self.author.fabric_uuid = 'user-99'
+        self.author.save()
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'approve'})
+        self.assertContains(response, 'already claimed by')
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-99')
+
+    def test_a_claim_that_has_gone_is_reported_rather_than_raising(self):
+        response = self.post({'claim_uuid': 'claim-gone', 'action': 'approve'})
+        self.assertContains(response, 'no longer exists')
+
+    def test_an_unknown_action_is_refused(self):
+        response = self.post({'claim_uuid': 'claim-1', 'action': 'delete'})
+        self.assertContains(response, 'Unknown action')
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AuthorClaim.SUGGESTED)
+
+    def test_the_status_tabs_show_the_ledger(self):
+        reject_suggestion(self.claim, decided_by=self.api_user)
+        self.assertNotContains(self.get(), 'Jane Smith')
+        response = self.get('?status=rejected')
+        self.assertContains(response, 'Jane Smith')
+        self.assertContains(response, 'An Admin')
+
+    def test_an_unknown_status_falls_back_to_the_queue(self):
+        response = self.get('?status=nonsense')
+        self.assertContains(response, 'Jane Smith')
+
+    def test_authors_are_ordered_by_their_best_candidate(self):
+        weaker_author = Author.objects.create(
+            author_name='Aaronson, A', display_name='Aaronson, A',
+            publication_uuid='pub-1', uuid='auth-2',
+        )
+        AuthorClaim.objects.create(
+            author=weaker_author, api_user=self.candidate, score=0.45, uuid='claim-2',
+        )
+        content = self.get().content.decode()
+        self.assertLess(content.index('Smith, Jane'), content.index('Aaronson, A'))
+
+
+class AuthorUpdateLedgerTests(TestCase):
+    """
+    The two decision paths that predate the queue now write to the ledger as well.
+    """
+
+    def setUp(self):
+        self.api_user = ApiUser.objects.create(uuid='user-1', name='Jane Smith')
+        self.target = ApiUser.objects.create(uuid='user-2', name='John Smith')
+        self.publication = Publication.objects.create(
+            authors=['auth-1'], title='A paper', uuid='pub-1', year='2026',
+        )
+        self.author = Author.objects.create(
+            author_name='Smith, Jane', display_name='Smith, Jane',
+            publication_uuid='pub-1', uuid='auth-1',
+        )
+
+    def post(self, data, is_admin=False):
+        patches = (
+            mock.patch('publicationtrkr.apps.publications.views.get_api_user',
+                       return_value=self.api_user),
+            mock.patch.object(ApiUser, 'can_create_publication', True),
+            mock.patch.object(ApiUser, 'is_publication_tracker_admin', is_admin),
+        )
+        with patches[0], patches[1], patches[2]:
+            return self.client.post('/publications/authors/auth-1/update', data)
+
+    def test_a_self_claim_records_a_self_asserted_row(self):
+        self.post({'save': 'save', 'display_name': 'Jane Smith'})
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-1')
+        claim = AuthorClaim.objects.get()
+        self.assertEqual(claim.status, AuthorClaim.SELF_ASSERTED)
+        self.assertEqual(claim.source, AuthorClaim.SELF)
+        self.assertEqual(claim.api_user, self.api_user)
+
+    def test_a_self_claim_withdraws_the_suggestions_it_settles(self):
+        AuthorClaim.objects.create(
+            author=self.author, api_user=self.target, score=0.55, uuid='claim-1',
+        )
+        self.post({'save': 'save', 'display_name': 'Jane Smith'})
+        self.assertFalse(AuthorClaim.objects.filter(uuid='claim-1').exists())
+
+    def test_an_admin_form_write_records_an_admin_approval(self):
+        self.post({
+            'save': 'save', 'author_name': 'Smith, Jane', 'display_name': 'Smith, Jane',
+            'fabric_uuid': 'user-2', 'publication_uuid': 'pub-1',
+        }, is_admin=True)
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.fabric_uuid, 'user-2')
+        claim = AuthorClaim.objects.get()
+        self.assertEqual(claim.status, AuthorClaim.APPROVED)
+        self.assertEqual(claim.source, AuthorClaim.ADMIN)
+
+    def test_moving_an_author_updates_both_publications_author_arrays(self):
+        # Regression: AuthorForm.is_valid() writes the posted values onto the instance, so
+        # the "did publication_uuid change?" comparison used to read the new value on both
+        # sides and never fired. Both arrays were left wrong.
+        Publication.objects.create(authors=[], title='Another paper', uuid='pub-2', year='2026')
+        self.post({
+            'save': 'save', 'author_name': 'Smith, Jane', 'display_name': 'Smith, Jane',
+            'fabric_uuid': '', 'publication_uuid': 'pub-2',
+        }, is_admin=True)
+        self.assertEqual(Publication.objects.get(uuid='pub-1').authors, [])
+        self.assertEqual(Publication.objects.get(uuid='pub-2').authors, ['auth-1'])
+
+    def test_an_admin_rename_withdraws_the_suggestions_computed_from_the_old_name(self):
+        AuthorClaim.objects.create(
+            author=self.author, api_user=self.target, score=0.55, uuid='claim-1',
+        )
+        self.post({
+            'save': 'save', 'author_name': 'Okonkwo, Jane', 'display_name': 'Smith, Jane',
+            'fabric_uuid': '', 'publication_uuid': 'pub-1',
+        }, is_admin=True)
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.author_name, 'Okonkwo, Jane')
+        self.assertFalse(AuthorClaim.objects.filter(uuid='claim-1').exists())
