@@ -1,12 +1,19 @@
 {% load static %}
 <link rel="stylesheet" href="{% static 'css/footer.css' %}">
-<div class="footer" style="background-color: #374955;">
-    <a
-      href="https://portal.fabric-testbed.net"
-      target="_blank"
-      rel="noreferrer"
-      class="link"
-    >© FABRIC 2026</a>
+<div class="footer">
+    <div class="footer-top">
+        <a
+          href="https://portal.fabric-testbed.net"
+          target="_blank"
+          rel="noreferrer"
+          class="link"
+        >© FABRIC 2026</a>
+        {% comment %}
+            Which release is deployed, on every page. settings.APP_VERSION is read
+            from pyproject.toml and reaches here via a context processor.
+        {% endcomment %}
+        <span class="footer-version" title="Publication Tracker release">v{{ app_version }}</span>
+    </div>
     <div class="sm-font">
         FABRIC is supported in part by 
         <a

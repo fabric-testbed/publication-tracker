@@ -136,12 +136,14 @@
                                         <span class="sm-font text-muted">
                                             {{ claim.get_status_display }}
                                             {% if claim.decided_at %}
-                                                {# A model datetime, not the stringified
-                                                   one an as_dict() carries, so the
-                                                   builtin date filter rather than
-                                                   normalize_date_to_utc -- that one takes
-                                                   len() of its argument. TIME_ZONE is
-                                                   UTC. #}
+                                                {% comment %}
+                                                    A model datetime, not the stringified
+                                                    one an as_dict() carries, so the
+                                                    builtin date filter rather than
+                                                    normalize_date_to_utc -- that one takes
+                                                    len() of its argument. TIME_ZONE is
+                                                    UTC.
+                                                {% endcomment %}
                                                 <br>{{ claim.decided_at|date:"Y-m-d H:i" }} UTC
                                             {% endif %}
                                             {% if claim.decided_by %}

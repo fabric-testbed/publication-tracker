@@ -1,5 +1,6 @@
 /* Site footer styling */
 .footer {
+  background-color: var(--pt-bar-bg);
   position: fixed;
   font-size: 0.9rem;
   display: flex;
@@ -23,4 +24,18 @@
 .footer .sm-font,
 .footer .sm-font a {
   color: rgba(255, 255, 255, 0.8);
+}
+
+/* Copyright and release number share a line; the version is deliberately quieter
+   than the link beside it. */
+.footer .footer-top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.footer .footer-version {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
 }

@@ -1,5 +1,74 @@
 /* FABRIC Publication Tracker — main styling */
 
+/* ===== Theme tokens =====
+   Light is the default. The dark block is applied by the theme switcher in
+   navbar.html, which sets data-bs-theme on <html> ("light" or "dark", with
+   "system" resolved to one of the two). Bootstrap 5.3 reads that same
+   attribute for its own components, so these tokens only need to cover the
+   custom surfaces defined further down this file. */
+:root {
+  --pt-surface: #fff;
+  --pt-surface-2: #f5f8fa;
+  --pt-surface-3: #f8f9fa;
+  --pt-surface-hover: #f8fafb;
+  --pt-border: #e2e8f0;
+  --pt-border-subtle: #f0f2f5;
+  --pt-border-input: #d1d9e0;
+  --pt-text: #555;
+  --pt-text-strong: #374955;
+  --pt-text-muted: #838385;
+  --pt-text-subtle: #6c757d;
+  --pt-danger-text: #b00020;
+  --pt-success-text: #008e7a;
+  --pt-link: #5798bc;
+  --pt-link-hover: #1f6a8c;
+  --pt-badge-bg: #eef5fa;
+  --pt-badge-text: #1f6a8c;
+  --pt-badge-project-bg: #e8f5f2;
+  --pt-badge-project-text: #008e7a;
+  --pt-bar-bg: #374955;
+  --pt-card-shadow: 0 4px 16px rgba(55, 73, 85, 0.1);
+}
+
+[data-bs-theme="dark"] {
+  /* Bootstrap's own dark defaults, re-tinted toward the FABRIC dark (#374955)
+     so framework components sit on the same ground as ours. */
+  --bs-body-bg: #161d23;
+  --bs-body-color: #d6dee5;
+  --bs-emphasis-color: #f2f6f9;
+  --bs-border-color: #35444f;
+
+  --pt-surface: #1e272e;
+  --pt-surface-2: #253038;
+  --pt-surface-3: #253038;
+  --pt-surface-hover: #2a3742;
+  --pt-border: #35444f;
+  --pt-border-subtle: #2b3841;
+  --pt-border-input: #3d4d59;
+  --pt-text: #c3ced7;
+  --pt-text-strong: #e6edf3;
+  --pt-text-muted: #94a5b2;
+  --pt-text-subtle: #8fa1ae;
+  /* The brand red and green are too dark to read as text on a dark ground;
+     these lighten only the text uses, never the filled buttons. */
+  --pt-danger-text: #ff7a8a;
+  --pt-success-text: #3ecfb4;
+  --pt-link: #8ac9ef;
+  --pt-link-hover: #b6ddf7;
+  --pt-badge-bg: rgba(87, 152, 188, 0.2);
+  --pt-badge-text: #a8d3ee;
+  --pt-badge-project-bg: rgba(0, 142, 122, 0.22);
+  --pt-badge-project-text: #4fd1b6;
+  --pt-card-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Scoped to <html> rather than sharing the block above: the navbar pins its own
+   subtree to data-bs-theme="dark" so its dropdown stays dark in both site themes,
+   which would otherwise re-resolve --pt-bar-bg and darken the bar in light mode. */
+:root[data-bs-theme="dark"] {
+  --pt-bar-bg: #22303a;
+}
+
 /* Typography */
 body {
   font-family: 'Roboto', sans-serif;
@@ -30,8 +99,8 @@ ul.errorlist {
 }
 
 .errorlist li {
-  border: 1px solid #b00020;
-  color: #b00020;
+  border: 1px solid var(--pt-danger-text);
+  color: var(--pt-danger-text);
   background: rgba(176, 0, 32, 0.1);
   list-style-position: inside;
   display: block;
@@ -60,8 +129,8 @@ select {
   background-color: rgba(0, 142, 122, 0.15);
   padding: 10px;
   text-align: center;
-  color: #008e7a;
-  border: 1px solid #008e7a;
+  color: var(--pt-success-text);
+  border: 1px solid var(--pt-success-text);
   border-radius: 3px;
 }
 
@@ -76,7 +145,7 @@ select {
 }
 
 .profile-body .active {
-  background-color: #fff;
+  background-color: var(--pt-surface);
 }
 
 .list-group-item.active {
@@ -155,16 +224,16 @@ h4[aria-expanded="false"] .fa-minus {
 
 /* Links — FABRIC primary color */
 .card-header a {
-  color: #5798bc;
+  color: var(--pt-link);
 }
 
 a {
-  color: #5798bc;
+  color: var(--pt-link);
   text-decoration: none;
 }
 
 a:hover {
-  color: #1f6a8c !important;
+  color: var(--pt-link-hover) !important;
 }
 
 .btn:hover {
@@ -176,7 +245,7 @@ a:hover {
   padding: 1.25rem;
   margin-top: 1.25rem;
   margin-bottom: 1.25rem;
-  border: 1px solid #e9ecef;
+  border: 1px solid var(--pt-border);
   border-left-width: 0.25rem;
   border-radius: 0.25rem;
 }
@@ -198,7 +267,7 @@ a:hover {
 
 .btn-outline-primary {
   border-color: #5798bc !important;
-  color: #5798bc !important;
+  color: var(--pt-link) !important;
 }
 
 .btn-check:checked+.btn, .btn.active, .btn.show, .btn:first-child:active, :not(.btn-check)+.btn:active {
@@ -217,7 +286,7 @@ a:hover {
 
 .btn-outline-success {
   border-color: #008e7a !important;
-  color: #008e7a !important;
+  color: var(--pt-success-text) !important;
 }
 
 .btn-outline-success:hover {
@@ -232,7 +301,7 @@ a:hover {
 
 .btn-outline-danger {
   border-color: #b00020 !important;
-  color: #b00020 !important;
+  color: var(--pt-danger-text) !important;
 }
 
 .btn-outline-danger:hover {
@@ -262,6 +331,10 @@ a:hover {
 }
 
 /* Navbar */
+.navbar-fabric {
+  background-color: var(--pt-bar-bg);
+}
+
 .navbar {
   padding-top: 0 !important;
   padding-bottom: 0 !important;
@@ -304,13 +377,13 @@ a:hover {
 
 .page-header .subtitle {
   font-size: 0.9rem;
-  color: #838385;
+  color: var(--pt-text-muted);
 }
 
 /* Search bar */
 .search-bar {
   border-radius: 0.5rem;
-  border: 1px solid #d1d9e0;
+  border: 1px solid var(--pt-border-input);
   padding: 0.6rem 1rem;
   font-size: 0.95rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -332,8 +405,8 @@ a:hover {
 
 /* Publication cards (list views) */
 .pub-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
   border-radius: 0.75rem;
   padding: 1.25rem 1.5rem;
   margin-bottom: 1rem;
@@ -341,41 +414,41 @@ a:hover {
 }
 
 .pub-card:hover {
-  box-shadow: 0 4px 16px rgba(55, 73, 85, 0.1);
+  box-shadow: var(--pt-card-shadow);
   transform: translateY(-1px);
 }
 
 .pub-title a {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #374955;
+  color: var(--pt-text-strong);
   text-decoration: none;
 }
 
 .pub-title a:hover {
-  color: #5798bc !important;
+  color: var(--pt-link) !important;
 }
 
 .pub-source-link {
   font-size: 0.85rem;
   font-style: italic;
-  color: #5798bc;
+  color: var(--pt-link);
 }
 
 .pub-meta {
   font-size: 0.92rem;
-  color: #555;
+  color: var(--pt-text);
   margin-top: 0.4rem;
   line-height: 1.6;
 }
 
 .pub-meta-label {
   font-weight: 500;
-  color: #374955;
+  color: var(--pt-text-strong);
 }
 
 .pub-authors a {
-  color: #5798bc;
+  color: var(--pt-link);
   text-decoration: none;
 }
 
@@ -385,8 +458,8 @@ a:hover {
 
 .pub-badge {
   display: inline-block;
-  background: #eef5fa;
-  color: #1f6a8c;
+  background: var(--pt-badge-bg);
+  color: var(--pt-badge-text);
   font-size: 0.8rem;
   font-weight: 500;
   padding: 0.2rem 0.6rem;
@@ -400,13 +473,13 @@ a:hover {
 }
 
 .pub-badge-project {
-  background: #e8f5f2;
-  color: #008e7a;
+  background: var(--pt-badge-project-bg);
+  color: var(--pt-badge-project-text);
 }
 
 /* Pagination bar */
 .pagination-bar {
-  background: #f8f9fa;
+  background: var(--pt-surface-3);
   border-radius: 0.75rem;
   padding: 0.75rem 1.25rem;
   margin-top: 0.5rem;
@@ -418,14 +491,14 @@ a:hover {
 
 .results-count {
   font-size: 0.9rem;
-  color: #6c757d;
+  color: var(--pt-text-subtle);
   font-weight: 500;
 }
 
 /* Detail cards (replacing striped tables on detail pages) */
 .detail-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
   border-radius: 0.75rem;
   overflow: hidden;
   margin-bottom: 1.5rem;
@@ -434,7 +507,7 @@ a:hover {
 .detail-row {
   display: flex;
   padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--pt-border-subtle);
   align-items: baseline;
 }
 
@@ -443,25 +516,25 @@ a:hover {
 }
 
 .detail-row:hover {
-  background: #f8fafb;
+  background: var(--pt-surface-hover);
 }
 
 .detail-label {
   flex: 0 0 160px;
   font-weight: 500;
-  color: #374955;
+  color: var(--pt-text-strong);
   font-size: 0.9rem;
 }
 
 .detail-value {
   flex: 1;
-  color: #555;
+  color: var(--pt-text);
 }
 
 /* Form cards */
 .form-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
   border-radius: 0.75rem;
   padding: 1.5rem 2rem;
   margin-bottom: 1.5rem;
@@ -473,7 +546,7 @@ a:hover {
 
 .form-card label {
   font-weight: 500;
-  color: #374955;
+  color: var(--pt-text-strong);
   margin-bottom: 0.25rem;
   display: block;
 }
@@ -482,7 +555,7 @@ a:hover {
 .form-card textarea,
 .form-card select {
   border-radius: 0.4rem;
-  border: 1px solid #d1d9e0;
+  border: 1px solid var(--pt-border-input);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -494,19 +567,19 @@ a:hover {
 }
 
 .form-card hr {
-  border-color: #e2e8f0;
+  border-color: var(--pt-border);
   margin: 1.25rem 0;
 }
 
 .form-divider {
   border: none;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--pt-border);
   margin: 1.25rem 0;
 }
 
 label.required::after {
   content: ' * required';
-  color: #b00020;
+  color: var(--pt-danger-text);
   font-size: small;
   font-weight: 400;
 }
@@ -516,27 +589,27 @@ label.required::after {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--pt-border);
   border-radius: 0.75rem;
   overflow: hidden;
   margin-bottom: 1.5rem;
 }
 
 .soft-table thead th {
-  background: #f5f8fa;
-  color: #374955;
+  background: var(--pt-surface-2);
+  color: var(--pt-text-strong);
   font-weight: 600;
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   padding: 0.75rem 1rem;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid var(--pt-border);
 }
 
 .soft-table tbody td {
   padding: 0.7rem 1rem;
-  border-bottom: 1px solid #f0f2f5;
-  color: #555;
+  border-bottom: 1px solid var(--pt-border-subtle);
+  color: var(--pt-text);
   font-size: 0.92rem;
 }
 
@@ -545,14 +618,14 @@ label.required::after {
 }
 
 .soft-table tbody tr:hover {
-  background: #f8fafb;
+  background: var(--pt-surface-hover);
 }
 
 /* Empty state */
 .empty-state {
   text-align: center;
   padding: 3rem 1rem;
-  color: #838385;
+  color: var(--pt-text-muted);
 }
 
 .empty-state i {
@@ -582,10 +655,10 @@ label.required::after {
   height: 1.6rem;
   padding: 0;
   margin-left: 0.4rem;
-  border: 1px solid #d1d9e0;
+  border: 1px solid var(--pt-border-input);
   border-radius: 0.35rem;
-  background: #f5f8fa;
-  color: #838385;
+  background: var(--pt-surface-2);
+  color: var(--pt-text-muted);
   cursor: pointer;
   font-size: 0.75rem;
   transition: all 0.2s ease;
@@ -613,7 +686,7 @@ label.required::after {
 
 /* Code block styling for home page */
 .code-block {
-  background: #374955;
+  background: var(--pt-bar-bg);
   border-radius: 0.75rem;
   padding: 1.25rem 1.5rem;
   overflow-x: auto;
@@ -622,4 +695,46 @@ label.required::after {
 .code-block code {
   color: #e8e8e8;
   font-size: 0.9rem;
+}
+
+/* ===== Theme switcher (navbar) =====
+   Selection state is driven entirely by data-pt-theme-choice on <html>, which the
+   head script sets before first paint. Nothing here depends on JavaScript having
+   run, so the menu never shows a stale choice. */
+.theme-toggle {
+  --bs-btn-padding-x: 0.6rem;
+  line-height: 1.5;
+}
+
+[data-theme-icon] {
+  display: none;
+}
+
+:root[data-pt-theme-choice="light"] [data-theme-icon="light"],
+:root[data-pt-theme-choice="dark"] [data-theme-icon="dark"],
+:root[data-pt-theme-choice="system"] [data-theme-icon="system"] {
+  display: inline-block;
+}
+
+.dropdown-item[data-set-theme] {
+  display: flex;
+  align-items: center;
+}
+
+:root[data-pt-theme-choice="light"] .dropdown-item[data-set-theme="light"],
+:root[data-pt-theme-choice="dark"] .dropdown-item[data-set-theme="dark"],
+:root[data-pt-theme-choice="system"] .dropdown-item[data-set-theme="system"] {
+  background-color: #5798bc;
+  color: #fff;
+}
+
+.theme-check {
+  margin-left: auto;
+  visibility: hidden;
+}
+
+:root[data-pt-theme-choice="light"] .dropdown-item[data-set-theme="light"] .theme-check,
+:root[data-pt-theme-choice="dark"] .dropdown-item[data-set-theme="dark"] .theme-check,
+:root[data-pt-theme-choice="system"] .dropdown-item[data-set-theme="system"] .theme-check {
+  visibility: visible;
 }

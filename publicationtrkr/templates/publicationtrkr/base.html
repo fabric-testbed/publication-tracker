@@ -1,7 +1,56 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="utf-8"/>
+    <!-- Colour theme.
+         This runs before any stylesheet or markup so the stored choice is on
+         <html> at first paint; deferring it to DOMContentLoaded would flash the
+         light theme on every navigation. Bootstrap 5.3 and main.css both key off
+         data-bs-theme, which is always the resolved theme ("light" or "dark").
+         The user's choice, which may be "system", is kept alongside it in
+         data-pt-theme-choice. -->
+    <script>
+        (function () {
+            var KEY = 'pt-theme';
+            var media = window.matchMedia('(prefers-color-scheme: dark)');
+            var choice;
+            try {
+                choice = window.localStorage.getItem(KEY);
+            } catch (e) {
+                // Storage can throw outright (Safari private mode, blocked cookies).
+                choice = null;
+            }
+            if (choice !== 'light' && choice !== 'dark') {
+                choice = 'system';
+            }
+
+            function apply() {
+                var resolved = choice === 'system' ? (media.matches ? 'dark' : 'light') : choice;
+                document.documentElement.setAttribute('data-bs-theme', resolved);
+                document.documentElement.setAttribute('data-pt-theme-choice', choice);
+            }
+
+            window.ptTheme = {
+                get: function () {
+                    return choice;
+                },
+                set: function (next) {
+                    choice = next;
+                    try {
+                        window.localStorage.setItem(KEY, next);
+                    } catch (e) { /* not fatal: the choice just won't outlive the page */ }
+                    apply();
+                }
+            };
+
+            apply();
+            media.addEventListener('change', function () {
+                if (choice === 'system') {
+                    apply();
+                }
+            });
+        })();
+    </script>
     <!-- Load static files-->
     {% load static %}
     {# Load the tag library #}
@@ -38,6 +87,25 @@
 {% include 'footer.html' %}
 <script>
     document.addEventListener('DOMContentLoaded', function () {
+        // Theme switcher. Which entry looks selected, and which icon the button
+        // shows, is decided in CSS from data-pt-theme-choice on <html> -- so the
+        // menu is already correct on first paint. This only records the click and
+        // keeps aria-checked in step.
+        function syncThemeAria() {
+            var choice = window.ptTheme.get();
+            document.querySelectorAll('[data-set-theme]').forEach(function (el) {
+                el.setAttribute('aria-checked', el.dataset.setTheme === choice ? 'true' : 'false');
+            });
+        }
+
+        document.querySelectorAll('[data-set-theme]').forEach(function (el) {
+            el.addEventListener('click', function () {
+                window.ptTheme.set(el.dataset.setTheme);
+                syncThemeAria();
+            });
+        });
+        syncThemeAria();
+
         // Initialize Bootstrap tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.map(function (el) {
