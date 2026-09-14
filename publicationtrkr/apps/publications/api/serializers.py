@@ -7,7 +7,8 @@ from publicationtrkr.apps.publications.utils.bibtex_utils import generate_bibtex
 class AuthorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Author
-        fields = ['author_name', 'display_name', 'fabric_uuid', 'publication_uuid', 'uuid']
+        fields = ['author_name', 'author_order', 'display_name', 'fabric_uuid', 'publication_uuid',
+                  'uuid']
 
 
 class PublicationSerializer(serializers.ModelSerializer):
@@ -42,8 +43,24 @@ class PublicationSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_authors(self) -> list:
-        authors = Author.objects.filter(uuid__in=self.authors)
-        return AuthorSerializer(authors, many=True).data
+        """
+        The publication's authors in the order they appear on the publication.
+
+        `filter(uuid__in=...)` answers "which rows", never "in what order": the uuid list
+        is an unordered set as far as SQL is concerned. Author.Meta.ordering now supplies
+        an ORDER BY, but it is not relied on alone -- a `.distinct()`, a join or a future
+        annotation on this queryset could displace it, and the failure would be silent.
+        Re-mapping through self.authors, which is the authoritative order, cannot be
+        undone by any of that. This is the same shape as
+        bibtex_utils._resolve_author_names, and keeping the two alike is what makes the
+        `bibtex` string and the `authors` array in one response agree.
+
+        Rows named in the array but missing from the table are skipped rather than raising
+        -- the same tolerance _resolve_author_names has always had.
+        """
+        by_uuid = {author.uuid: author for author in Author.objects.filter(uuid__in=self.authors)}
+        ordered = [by_uuid[author_uuid] for author_uuid in self.authors if author_uuid in by_uuid]
+        return AuthorSerializer(ordered, many=True).data
 
     @staticmethod
     def get_bibtex(self) -> str:

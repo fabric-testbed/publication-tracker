@@ -224,13 +224,16 @@ class CreatePublicationTests(TestCase):
         self.api_user = ApiUser.objects.create(uuid='user-1')
 
     def test_authors_are_created_and_linked(self):
+        # Names deliberately not in alphabetical order, and asserted without re-sorting.
+        # This used to read `.order_by('author_name')`, which made the assertion pass
+        # whatever order the rows came back in -- the exact blind spot behind #61.
         publication = create_publication(
-            data={'title': 'A Paper', 'year': '2024', 'authors': ['Jane Doe', 'John Roe']},
+            data={'title': 'A Paper', 'year': '2024', 'authors': ['John Roe', 'Jane Doe']},
             api_user=self.api_user)
         authors = Author.objects.filter(uuid__in=publication.authors)
         self.assertEqual(len(publication.authors), 2)
-        self.assertEqual([a.author_name for a in authors.order_by('author_name')],
-                         ['Jane Doe', 'John Roe'])
+        self.assertEqual([a.author_name for a in authors], ['John Roe', 'Jane Doe'])
+        self.assertEqual([a.author_order for a in authors], [0, 1])
         self.assertEqual({a.publication_uuid for a in authors}, {publication.uuid})
 
     def test_bibtex_supplies_the_fields_that_were_not_given(self):
@@ -278,6 +281,109 @@ class CreatePublicationTests(TestCase):
             api_user=self.api_user, resolve_project_name=resolver)
         self.assertEqual(looked_up.project_name, 'Looked Up Project')
         self.assertEqual(calls, ['p-1'])
+
+
+
+class AuthorOrderTests(TestCase):
+    """
+    The ordering contract from #61: the order a publication's authors are given in is the
+    order every read hands back.
+
+    `ORDER` is deliberately neither alphabetical nor reverse-alphabetical, so a test that
+    passes here cannot be passing by accident on a sorted queryset.
+    """
+
+    ORDER = ['Zoe Quill', 'Adam Birch', 'Mona Vale', 'Carl Denning']
+
+    def setUp(self):
+        self.api_user = ApiUser.objects.create(uuid='user-1')
+
+    def make_publication(self, authors=None):
+        return create_publication(
+            data={'title': 'A Paper', 'year': '2024', 'authors': authors or self.ORDER},
+            api_user=self.api_user)
+
+    def serialized_names(self, publication):
+        return [a['author_name'] for a in PublicationSerializer(publication).data['authors']]
+
+    def test_the_serialized_order_is_the_publication_order(self):
+        publication = self.make_publication()
+        self.assertEqual(self.serialized_names(publication), self.ORDER)
+
+    def test_author_order_is_zero_based_and_contiguous(self):
+        publication = self.make_publication()
+        serialized = PublicationSerializer(publication).data['authors']
+        self.assertEqual([a['author_order'] for a in serialized], [0, 1, 2, 3])
+
+    def test_order_survives_the_updates_that_used_to_scramble_it(self):
+        # A claim, a display_name edit and a rename each rewrite the row. That is what
+        # moved it in the heap and reordered the list back when nothing emitted ORDER BY.
+        publication = self.make_publication()
+        first = Author.objects.get(uuid=publication.authors[0])
+        first.fabric_uuid = 'user-1'
+        first.save(update_fields=['fabric_uuid'])
+        third = Author.objects.get(uuid=publication.authors[2])
+        third.display_name = 'M. Vale'
+        third.save(update_fields=['display_name'])
+
+        self.assertEqual(self.serialized_names(publication), self.ORDER)
+
+    def test_the_bibtex_string_and_the_authors_array_agree(self):
+        # generate_bibtex has always re-mapped through Publication.authors, so before the
+        # fix these two halves of the same response could disagree. Pinning them together
+        # is what stops the serializer drifting again.
+        publication = self.make_publication()
+        data = PublicationSerializer(publication).data
+        bibtex_names = data['bibtex'].split('author = {')[1].split('}')[0].split(' and ')
+        self.assertEqual(bibtex_names, [a['author_name'] for a in data['authors']])
+
+    def test_reordering_an_author_list_persists(self):
+        publication = self.make_publication()
+        reversed_order = list(reversed(self.ORDER))
+
+        publication = update_publication(
+            publication=publication, data={'authors': reversed_order}, api_user=self.api_user)
+
+        self.assertEqual(self.serialized_names(publication), reversed_order)
+        self.assertEqual(
+            [a['author_order'] for a in PublicationSerializer(publication).data['authors']],
+            [0, 1, 2, 3])
+
+    def test_shortening_then_extending_leaves_order_contiguous(self):
+        publication = self.make_publication()
+
+        publication = update_publication(
+            publication=publication, data={'authors': self.ORDER[:2]}, api_user=self.api_user)
+        self.assertEqual(self.serialized_names(publication), self.ORDER[:2])
+
+        extended = self.ORDER[:2] + ['Nia Frost']
+        publication = update_publication(
+            publication=publication, data={'authors': extended}, api_user=self.api_user)
+
+        self.assertEqual(self.serialized_names(publication), extended)
+        self.assertEqual(
+            [a['author_order'] for a in PublicationSerializer(publication).data['authors']],
+            [0, 1, 2])
+
+    def test_a_rename_does_not_disturb_the_other_slots(self):
+        publication = self.make_publication()
+        renamed = list(self.ORDER)
+        renamed[1] = 'Adam Birchwood'
+
+        publication = update_publication(
+            publication=publication, data={'authors': renamed}, api_user=self.api_user)
+
+        self.assertEqual(self.serialized_names(publication), renamed)
+
+    def test_an_author_row_missing_from_the_table_is_skipped_not_fatal(self):
+        # Publication.authors is a bare array with no foreign key behind it, so a uuid
+        # naming no row is possible. The old code silently returned a shorter list; this
+        # keeps that tolerance rather than raising mid-response.
+        publication = self.make_publication()
+        Author.objects.filter(uuid=publication.authors[1]).delete()
+
+        self.assertEqual(self.serialized_names(publication),
+                         [self.ORDER[0], self.ORDER[2], self.ORDER[3]])
 
 
 class UpdatePublicationTests(TestCase):

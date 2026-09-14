@@ -76,16 +76,45 @@ class Author(models.Model):
     """
     Author - represents an author entry tied to a specific Publication
     - author_name: name as found in the publication object when created
+    - author_order: 0-based slot of this author within its publication's author list
     - publication_uuid: reference to the Publication this author belongs to
     - display_name: editable name (defaults to author_name, modifiable by claimed user)
     - uuid: unique identifier for this author record
     - fabric_uuid: reference to the ApiUser uuid (set when claimed)
+
+    `author_order` exists because author order is a fact about the publication -- it is
+    the credit order printed on the paper -- and until now it had no home on the row that
+    carries the author. It was implied only by the position of this row's uuid inside
+    Publication.authors, so every read path that did not walk that array lost it.
+
+    The read path that lost it was PublicationSerializer.get_authors, which resolved the
+    array with `filter(uuid__in=...)` and no ordering. Author had no Meta.ordering either,
+    so no ORDER BY was emitted at all and Postgres was free to return heap order. Heap
+    order is not stable: an UPDATE rewrites a row and moves it, so claiming an author,
+    correcting a spelling or editing a display_name silently reordered that publication's
+    author list from then on. Measured against the production data of 2026-09-14, 146 of
+    178 multi-author publications were already being served out of order, including one
+    34-author paper whose first author came back last.
+
+    Publication.authors stays authoritative for *membership*: it is what the update path
+    reconciles against and what migration 0005 reads to backfill this column. This column
+    is the ordering key, written from that same array position inside the same
+    transaction (publication_builder._create_authors / _sync_authors), which is what keeps
+    the two from drifting.
     """
     author_name = models.CharField(max_length=255, blank=False, null=False)
+    author_order = models.PositiveIntegerField(default=0)
     display_name = models.CharField(max_length=255, blank=False, null=False)
     fabric_uuid = models.CharField(max_length=255, blank=True, null=True, default=None)
     publication_uuid = models.CharField(max_length=255, blank=False, null=False)
     uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False)
+
+    class Meta:
+        # The ordering every consumer inherits, so a caller that forgets to order is
+        # correct by default rather than subtly wrong. `id` is the tie-break: it keeps
+        # output deterministic among rows still at the default 0, which is what an author
+        # belonging to no publication's array would be.
+        ordering = ('author_order', 'id')
 
     def __str__(self):
         return self.uuid

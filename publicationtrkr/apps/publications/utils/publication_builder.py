@@ -86,9 +86,10 @@ def resolve_update_fields(data, bibtex_data=None) -> dict:
     return resolved
 
 
-def _new_author(publication_uuid: str, author_name: str) -> Author:
+def _new_author(publication_uuid: str, author_name: str, author_order: int) -> Author:
     author = Author()
     author.author_name = author_name
+    author.author_order = author_order
     author.display_name = author_name
     author.fabric_uuid = None
     author.publication_uuid = publication_uuid
@@ -98,8 +99,18 @@ def _new_author(publication_uuid: str, author_name: str) -> Author:
 
 
 def _create_authors(publication_uuid: str, author_names) -> list:
-    """One fresh Author row per name, returned in Publication.authors order."""
-    return [_new_author(publication_uuid, author_name).uuid for author_name in author_names]
+    """
+    One fresh Author row per name, returned in Publication.authors order.
+
+    The enumerate() index is the whole point: it is the credit order the caller gave us
+    -- parse_bibtex splits the BibTeX `author` field on ' and ' in order, and the web
+    form splits its comma-separated field in order -- and stamping it here is what makes
+    that order survive into every later read.
+    """
+    return [
+        _new_author(publication_uuid, author_name, i).uuid
+        for i, author_name in enumerate(author_names)
+    ]
 
 
 def _sync_authors(publication, author_names) -> list:
@@ -110,6 +121,11 @@ def _sync_authors(publication, author_names) -> list:
     display_name and fabric_uuid stable when a different author in the same list is
     renamed -- losing fabric_uuid here would silently unclaim someone's publication.
     Surplus rows are deleted rather than orphaned.
+
+    That same position is now also written to author_order, so a payload that reorders an
+    existing author list persists the new order instead of only appearing to change it.
+    A reorder is not a rename: author_order is updated on its own, and the claim
+    suggestions are left alone, because the row still refers to the same person.
     """
     existing_uuids = list(publication.authors)
     new_author_uuids = []
@@ -118,9 +134,17 @@ def _sync_authors(publication, author_names) -> list:
             # Update the existing Author in place
             try:
                 author = Author.objects.get(uuid=existing_uuids[i])
-                if author.author_name != author_name:
+                renamed = author.author_name != author_name
+                changed_fields = []
+                if renamed:
                     author.author_name = author_name
-                    author.save(update_fields=['author_name'])
+                    changed_fields.append('author_name')
+                if author.author_order != i:
+                    author.author_order = i
+                    changed_fields.append('author_order')
+                if changed_fields:
+                    author.save(update_fields=changed_fields)
+                if renamed:
                     # The claim suggestions for this row were scored against the old
                     # spelling and are no longer about this author, so they are withdrawn
                     # rather than left in the queue for up to a day until the next scoring
@@ -132,7 +156,7 @@ def _sync_authors(publication, author_names) -> list:
             except Author.DoesNotExist:
                 pass
         # New author, or the matched record has gone missing -- create fresh
-        new_author_uuids.append(_new_author(publication.uuid, author_name).uuid)
+        new_author_uuids.append(_new_author(publication.uuid, author_name, i).uuid)
     # Remove any leftover Authors beyond the new list length
     for old_uuid in existing_uuids[len(author_names):]:
         Author.objects.filter(uuid=old_uuid).delete()
