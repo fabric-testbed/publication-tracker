@@ -1,4 +1,8 @@
+import re
+
 import bibtexparser
+from bibtexparser.bparser import BibTexParser
+from bibtexparser.customization import splitname
 
 # Fields every entry must carry for a publication to be built from it. The single
 # entry parser stays lenient (its callers validate separately); parse_bibtex_entries
@@ -9,6 +13,145 @@ REQUIRED_BIBTEX_FIELDS = ('authors', 'title', 'year')
 PROCEEDINGS_ENTRY_TYPES = frozenset({'inproceedings', 'conference', 'incollection', 'proceedings'})
 
 DEFAULT_ENTRY_TYPE = 'article'
+
+# One character that cannot appear in a BibTeX field, used to blank out braced spans so
+# that a separator search only ever sees the top level.
+_MASK = '\x00'
+
+# The BibTeX name separator: " and " surrounded by whitespace, at brace depth 0.
+_AND = re.compile(r'\s+and\s+')
+
+
+# Month names spelled out. BibTeX defines the three-letter macros jan..dec, which
+# `common_strings` supplies, but not these -- and 30 of the 188 stored entries in
+# production carry a bare `month=July` or `month=June`, which publisher exports
+# (Crossref's in particular) emit freely. Without them bibtexparser raises
+# UndefinedString and parse_bibtex returns *no fields at all*, so a whole entry silently
+# stops being readable over one word in a field nothing here even stores. Found while
+# checking #66's round-trip criterion against production, where it made 16% of the
+# corpus un-re-importable.
+_LONG_MONTHS = {
+    'january': 'January', 'february': 'February', 'march': 'March', 'april': 'April',
+    'june': 'June', 'july': 'July', 'august': 'August', 'september': 'September',
+    'sept': 'September', 'october': 'October', 'november': 'November',
+    'december': 'December',
+}
+
+
+def _bibtex_parser() -> BibTexParser:
+    """
+    A parser that can read what publishers actually emit.
+
+    A fresh one per call: bibtexparser accumulates the strings and entries it has seen on
+    the parser object, so a shared instance would leak one document's macros into the
+    next.
+    """
+    parser = BibTexParser(common_strings=True)
+    parser.bib_database.strings.update(_LONG_MONTHS)
+    return parser
+
+
+def _mask_braced(value: str) -> str:
+    """
+    A same-length copy of `value` with everything inside braces blanked out.
+
+    Searching the mask and slicing the original is what makes the separator search
+    brace-aware without hand-rolling a scanner: `{Ministry of Health and Welfare}` is one
+    author, and `{Smith, John}` is one name that must not be un-inverted, because the
+    braces are BibTeX's way of saying "treat this as a unit".
+    """
+    out = []
+    depth = 0
+    for char in value:
+        if char == '{':
+            depth += 1
+            out.append(_MASK)
+        elif char == '}':
+            depth = max(depth - 1, 0)
+            out.append(_MASK)
+        else:
+            out.append(_MASK if depth else char)
+    return ''.join(out)
+
+
+def _strip_outer_braces(name: str) -> str:
+    """`{The FABRIC Team}` is a literal name; the braces are markup, not part of it."""
+    while len(name) > 1 and name.startswith('{') and name.endswith('}') \
+            and _mask_braced(name).strip(_MASK) == '':
+        name = name[1:-1].strip()
+    return name
+
+
+def split_author_field(author_field: str) -> list:
+    """
+    Split a BibTeX `author` field into individual names.
+
+    The separator is " and " **at brace depth 0**. The old code split the raw string, so
+    a braced corporate author or any surname containing the word "and" was cut in half.
+    """
+    if not author_field:
+        return []
+    value = ' '.join(author_field.split())
+    mask = _mask_braced(value)
+    names, start = [], 0
+    for match in _AND.finditer(mask):
+        names.append(value[start:match.start()])
+        start = match.end()
+    names.append(value[start:])
+    return [name.strip() for name in names if name.strip()]
+
+
+def normalize_author_name(name: str) -> str:
+    """
+    Un-invert one BibTeX name: `"Grigoryan, Garegin"` -> `"Garegin Grigoryan"`.
+
+    `"Last, First"` is the dominant BibTeX convention, and nothing here ever un-inverted
+    it (#66). The stored strings that came out of that are what #62 had to repair by hand,
+    so this is the half of the fix that stops them coming back.
+
+    **A name with no top-level comma is returned untouched** beyond whitespace tidying.
+    That is deliberate: `splitname` would happily re-derive `"Cees de Laat"` from itself,
+    but it would also have an opinion about names it was never given a comma to interpret,
+    and quietly rewriting an author who is already stored correctly is exactly the harm
+    #62 spent its length undoing. A comma is the author saying which part is the surname;
+    without one there is nothing to act on.
+
+    Never raises. Every caller reaches this through `parse_bibtex`, whose contract is that
+    unparseable input yields no defaults rather than an error.
+    """
+    if not name:
+        return ''
+    value = ' '.join(name.split())
+    if ',' not in _mask_braced(value):
+        return _strip_outer_braces(value)
+    try:
+        parts = splitname(value, strict_mode=False)
+    except Exception:
+        return _strip_outer_braces(value)
+    ordered = parts.get('first', []) + parts.get('von', []) + parts.get('last', []) \
+        + parts.get('jr', [])
+    rebuilt = ' '.join(piece for piece in ordered if piece).strip()
+    return _strip_outer_braces(rebuilt) or _strip_outer_braces(value)
+
+
+def author_names(author_field: str) -> list:
+    """
+    Every name in a BibTeX `author` field, split and un-inverted, in printed order.
+
+    A bare `others` is dropped. In BibTeX `and others` is *et al.*, not a person, and
+    storing it made an `Author` row that a real human could claim -- which is what
+    `aef4e78c` had before #62 repaired it. The truncation is not lost: the entry is stored
+    verbatim in `Publication.bibtex`, which still says `and others`. A braced `{others}`
+    survives, because braces are the author asserting that it is a literal name.
+    """
+    names = []
+    for part in split_author_field(author_field):
+        if part.strip().lower() == 'others':
+            continue
+        name = normalize_author_name(part)
+        if name:
+            names.append(name)
+    return names
 
 
 def _resolve_author_names(publication) -> list:
@@ -41,10 +184,9 @@ def _entry_to_fields(entry: dict) -> dict:
         'year': None,
     }
 
-    # author -> split on " and " -> authors list
+    # author -> split on " and " at depth 0 -> un-invert "Last, First" -> authors list
     if entry.get('author'):
-        names = [a.strip() for a in entry['author'].split(' and ') if a.strip()]
-        fields['authors'] = names or None
+        fields['authors'] = author_names(entry['author']) or None
 
     # title
     if entry.get('title'):
@@ -79,7 +221,7 @@ def parse_bibtex(bibtex_string: str) -> dict:
     empty = _entry_to_fields({})
     empty['entry_type'] = None
     try:
-        bib_database = bibtexparser.loads(bibtex_string)
+        bib_database = bibtexparser.loads(bibtex_string, parser=_bibtex_parser())
         if not bib_database.entries:
             return empty
         return _entry_to_fields(bib_database.entries[0])
@@ -101,7 +243,7 @@ def parse_bibtex_entries(bibtex_string: str) -> tuple:
     to say which entries were skipped and why instead of silently taking the first.
     """
     try:
-        bib_database = bibtexparser.loads(bibtex_string)
+        bib_database = bibtexparser.loads(bibtex_string, parser=_bibtex_parser())
     except Exception as exc:
         return [], [{'index': None, 'error': 'unable to parse BibTeX: {0}'.format(exc)}]
 
@@ -132,6 +274,23 @@ def dumps_entry(entry: dict) -> str:
     database = bibtexparser.bibdatabase.BibDatabase()
     database.entries = [entry]
     return bibtexparser.dumps(database).strip()
+
+
+def _protect_name(name: str) -> str:
+    """
+    Brace a stored name that would not survive being read back.
+
+    `author` fields are joined on " and ", and a comma inside one means "Last, First", so
+    a corporate author like `Ministry of Health and Welfare` would come back as two
+    authors and `Smith, John` would come back inverted. Bracing says "this is one literal
+    name", which is exactly what split_author_field and normalize_author_name honour --
+    so generate -> parse round-trips.
+    """
+    if name.startswith('{') and name.endswith('}'):
+        return name
+    if _AND.search(name) or ',' in name:
+        return '{{{0}}}'.format(name)
+    return name
 
 
 def generate_bibtex(publication, entry_type: str = None) -> str:
@@ -167,7 +326,8 @@ def generate_bibtex(publication, entry_type: str = None) -> str:
         lines.append('  title = {{{0}}},'.format(publication.title))
 
     if author_names:
-        lines.append('  author = {{{0}}},'.format(' and '.join(author_names)))
+        lines.append('  author = {{{0}}},'.format(
+            ' and '.join(_protect_name(name) for name in author_names)))
 
     if publication.year:
         lines.append('  year = {{{0}}},'.format(publication.year))

@@ -1,0 +1,120 @@
+{
+  "issue": 66,
+  "publications": [
+    {
+      "publication_uuid": "6e09a709-ba33-47f7-8e23-f82a1a2566d8",
+      "note": "#66: the `link` column holds the paper's title instead of a URL, so the detail page renders a dead link. The DOI resolves live and is cross-confirmed by the DOE OSTI record. Authors are unchanged and unattributed on this record.",
+      "expect_authors": [
+        "Nik Sultana",
+        "Yatish Kumar",
+        "Chin Guok",
+        "James B. Kowalkowski",
+        "Michael H. L. S. Wang"
+      ],
+      "authors": [
+        {
+          "name": "Nik Sultana",
+          "fabric_uuid": "83b7a00c-fd23-43e7-82fa-af68411d270f"
+        },
+        {
+          "name": "Yatish Kumar",
+          "fabric_uuid": "f7eadb5b-c033-4893-8499-dda161b9db66"
+        },
+        {
+          "name": "Chin Guok",
+          "fabric_uuid": null
+        },
+        {
+          "name": "James B. Kowalkowski",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Michael H. L. S. Wang",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "link": "https://doi.org/10.1145/3696348.3696855"
+      }
+    },
+    {
+      "publication_uuid": "63f2ce16-7468-483f-9e2a-ef816f95ac07",
+      "note": "#66: the title is stored as the bare series name. The full title comes from Crossref's title+subtitle and the NSF PAR accepted manuscript (https://par.nsf.gov/servlets/purl/10380550). The stored BibTeX is ours rather than a publisher export -- it carries the same truncation and the DBLP disambiguation spellings #62 corrected off the rows -- so it is corrected with it.",
+      "expect_authors": [
+        "Joaquin Chung",
+        "Wojciech Zacherek",
+        "AJ Wisniewski",
+        "Zhengchun Liu",
+        "Tekin Bicer",
+        "Rajkumar Kettimuthu",
+        "Ian Foster"
+      ],
+      "authors": [
+        {
+          "name": "Joaquin Chung",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Wojciech Zacherek",
+          "fabric_uuid": null
+        },
+        {
+          "name": "AJ Wisniewski",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Zhengchun Liu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Tekin Bicer",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rajkumar Kettimuthu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Ian Foster",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "title": "SciStream: Architecture and Toolkit for Data Streaming between Federated Science Instruments",
+        "bibtex": "@inproceedings{Chung2022SciStream,\n  author = {Joaquin Chung and Wojciech Zacherek and AJ Wisniewski and Zhengchun Liu and Tekin Bicer and Rajkumar Kettimuthu and Ian Foster},\n  title = {SciStream: Architecture and Toolkit for Data Streaming between Federated Science Instruments},\n  year = {2022},\n  booktitle = {Proceedings of the 31st International Symposium on High-Performance Parallel and Distributed Computing (HPDC '22)},\n  doi = {10.1145/3502181.3531475},\n  url = {https://doi.org/10.1145/3502181.3531475}\n}"
+      }
+    },
+    {
+      "publication_uuid": "907bd5bf-ebb1-42ae-b260-fb0745a46aa6",
+      "note": "#66: the citation key contains spaces, which is not legal BibTeX, so bibtexparser rejects the entry outright and the record cannot be re-read at all -- the one entry of 188 still unparseable after the month-macro fix. Only the key changes; every field is left exactly as the publisher supplied it.",
+      "expect_authors": [
+        "Leonardo Gabriel Ferreira Rodrigues",
+        "Larissa Ferreira Rodrigues Moreira",
+        "Rodrigo Moreira",
+        "André Ricardo Backes"
+      ],
+      "authors": [
+        {
+          "name": "Leonardo Gabriel Ferreira Rodrigues",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Larissa Ferreira Rodrigues Moreira",
+          "fabric_uuid": "5ebe8ef6-c4fd-4f08-a6d0-adbef5a245a9"
+        },
+        {
+          "name": "Rodrigo Moreira",
+          "fabric_uuid": null
+        },
+        {
+          "name": "André Ricardo Backes",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@article{Rodrigues_2026, title={PSO-based Client Selection to Improve Medical Image Classification in Federated Learning}, volume={33}, url={https://seer.ufrgs.br/index.php/rita/article/view/150621}, DOI={10.22456/2175-2745.150621}, abstractNote={&amp;lt;p&amp;gt;Federated Learning (FL) offers an effective approach to enable collaborative model training across decentralized medical institutions while preserving patient privacy. However, FL faces challenges related to data heterogeneity and inefficient client participation issues. In this study, we introduce a novel client selection strategy based on Particle Swarm Optimization (PSO) to improve medical image classification in federated settings. Our method dynamically selects informative clients by evaluating their contributions to the global model, which reduces communication overhead and supports faster convergence. We performed experiments using three publicly available medical imaging datasets, Biglycan, ALL-IDB, and LC25000, focusing on binary classification tasks. The results show that the PSO-based approach improves performance over random client selection across all evaluated scenarios, with gains in accuracy, recall, precision, and F1-Score, even when selecting fewer clients. These findings indicate that incorporating PSO into FL frameworks helps address challenges related to data heterogeneity and communication efficiency while maintaining classification performance and privacy preservation.&amp;lt;/p&amp;gt;}, number={2}, journal={Revista de Informática Teórica e Aplicada}, author={Rodrigues, Leonardo Gabriel Ferreira and Rodrigues Moreira, Larissa Ferreira and Moreira, Rodrigo and Backes, André Ricardo}, year={2026}, month={Mar.}, pages={333–340} }"
+      }
+    }
+  ],
+  "orphan_authors": []
+}

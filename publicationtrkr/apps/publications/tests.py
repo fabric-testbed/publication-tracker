@@ -30,7 +30,7 @@ from publicationtrkr.apps.publications.api.viewsets import (
     PublicationViewSet,
     memoized_project_name_resolver,
 )
-from publicationtrkr.apps.publications.forms import PublicationForm
+from publicationtrkr.apps.publications.forms import PublicationForm, split_author_lines
 from publicationtrkr.apps.publications.models import Author, AuthorClaim, Publication
 from publicationtrkr.apps.publications.utils.claim_scoring import (
     MIN_SCORE,
@@ -50,9 +50,12 @@ from publicationtrkr.apps.publications.utils.name_matching import (
     parse_name,
 )
 from publicationtrkr.apps.publications.utils.bibtex_utils import (
+    author_names,
     generate_bibtex,
+    normalize_author_name,
     parse_bibtex,
     parse_bibtex_entries,
+    split_author_field,
 )
 from publicationtrkr.apps.publications.utils.bulk_ingest import (
     BulkIngestError,
@@ -2020,3 +2023,273 @@ class RepairOrphanAuthorTests(TestCase):
         with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
             with self.assertRaisesMessage(CommandError, 'holds claims for'):
                 self.run_command()
+
+
+class BibtexNameParsingTests(SimpleTestCase):
+    """
+    #66: the BibTeX `author` field is split on " and " at brace depth 0, and
+    `"Last, First"` is un-inverted. Both halves produced the rows #62 repaired by hand.
+    """
+
+    # The exact fields that produced the broken rows in production, from #62.
+    PRODUCTION_CASES = (
+        ('Grigoryan, Garegin and Penkowski, Kevin and Kwon, Minseok',
+         ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon']),
+        ('Rodrigues, Leonardo Gabriel Ferreira and Rodrigues Moreira, Larissa Ferreira '
+         'and Moreira, Rodrigo and Backes, André Ricardo',
+         ['Leonardo Gabriel Ferreira Rodrigues', 'Larissa Ferreira Rodrigues Moreira',
+          'Rodrigo Moreira', 'André Ricardo Backes']),
+        ('Shyamkumar, Nishanth and Bang, Hyunsuk and Sagstad, Bjoern and '
+         'Venkateshmurthy, Prajwal Somendyapanahalli and Cummings, Sean and Sultana, Nik',
+         ['Nishanth Shyamkumar', 'Hyunsuk Bang', 'Bjoern Sagstad',
+          'Prajwal Somendyapanahalli Venkateshmurthy', 'Sean Cummings', 'Nik Sultana']),
+    )
+
+    def test_the_fields_that_broke_production_now_parse_correctly(self):
+        for field, expected in self.PRODUCTION_CASES:
+            with self.subTest(field=field[:40]):
+                self.assertEqual(author_names(field), expected)
+
+    def test_a_name_with_no_comma_is_returned_untouched(self):
+        # The safety property. A stored name that is already right must not be rewritten
+        # by a re-import -- that is the harm #62 spent its length undoing.
+        for name in ('Cees de Laat', 'Flávio De Oliveira Silva', 'Flávio de Oliveira Silva',
+                     'Md. Nurul Absur', 'Shivendra S. Panwar', 'AJ Wisniewski',
+                     'Amith Gorthi Srinivasa Prabhakara Narasimha', 'Rosa M. Badia'):
+            with self.subTest(name=name):
+                self.assertEqual(normalize_author_name(name), name)
+
+    def test_a_braced_name_containing_and_is_one_author(self):
+        self.assertEqual(author_names('{Ministry of Health and Welfare}'),
+                         ['Ministry of Health and Welfare'])
+
+    def test_a_braced_name_containing_a_comma_is_not_un_inverted(self):
+        # Braces are the author saying "this is a literal".
+        self.assertEqual(author_names('{Smith, John}'), ['Smith, John'])
+
+    def test_braces_do_not_hide_a_real_separator(self):
+        self.assertEqual(
+            author_names('Smith, John and {The FABRIC Team} and de Laat, Cees'),
+            ['John Smith', 'The FABRIC Team', 'Cees de Laat'])
+
+    def test_and_others_is_not_a_person(self):
+        # aef4e78c stored the literal "others" as an author until #62 repaired it.
+        self.assertEqual(author_names('Casas-Moreno, Xavier and others'),
+                         ['Xavier Casas-Moreno'])
+
+    def test_a_braced_others_survives(self):
+        self.assertEqual(author_names('{others} and Doe, Jane'), ['others', 'Jane Doe'])
+
+    def test_a_suffix_and_a_particle_are_placed_correctly(self):
+        self.assertEqual(normalize_author_name('Gardner Jr., Robert William'),
+                         'Robert William Gardner Jr.')
+        self.assertEqual(normalize_author_name('van der Berg, Jr, Jan'),
+                         'Jan van der Berg Jr')
+
+    def test_newlines_and_runs_of_spaces_in_the_field(self):
+        self.assertEqual(
+            author_names('Moreira,   Rodrigo   and\n  de Oliveira Silva, Flávio'),
+            ['Rodrigo Moreira', 'Flávio de Oliveira Silva'])
+
+    def test_empty_input_is_an_empty_list(self):
+        self.assertEqual(author_names(''), [])
+        self.assertEqual(author_names(None), [])
+        self.assertEqual(split_author_field(''), [])
+        self.assertEqual(normalize_author_name(''), '')
+
+    def test_parse_bibtex_uses_it(self):
+        entry = ('@inproceedings{k2025, title={P4Kube}, year={2025}, '
+                 'author={Grigoryan, Garegin and Penkowski, Kevin and Kwon, Minseok}}')
+        self.assertEqual(parse_bibtex(entry)['authors'],
+                         ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon'])
+
+    def test_the_bulk_path_gets_the_same_treatment(self):
+        entries, errors = parse_bibtex_entries(
+            '@article{a2024, title={A}, year={2024}, author={Doe, Jane and Roe, John}}')
+        self.assertEqual(errors, [])
+        self.assertEqual(entries[0]['authors'], ['Jane Doe', 'John Roe'])
+
+
+class BibtexRoundTripTests(TestCase):
+    """
+    generate_bibtex joins on " and ", so anything it emits has to be readable by
+    split_author_field. Without bracing, a corporate author came back as two people.
+    """
+
+    def setUp(self):
+        self.api_user = ApiUser.objects.create(uuid='user-1')
+
+    def round_trip(self, names):
+        publication = create_publication(
+            data={'title': 'A Paper {0}'.format(names[0]), 'year': '2024', 'authors': names},
+            api_user=self.api_user)
+        return parse_bibtex(generate_bibtex(publication))['authors']
+
+    def test_ordinary_names_round_trip(self):
+        names = ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon']
+        self.assertEqual(self.round_trip(names), names)
+
+    def test_a_name_containing_and_round_trips(self):
+        names = ['Ministry of Health and Welfare', 'Jane Doe']
+        self.assertEqual(self.round_trip(names), names)
+
+    def test_a_stored_name_containing_a_comma_round_trips(self):
+        names = ['Smith, John', 'Jane Doe']
+        self.assertEqual(self.round_trip(names), names)
+
+    def test_accents_and_particles_round_trip(self):
+        names = ['Flávio de Oliveira Silva', 'Moisés R.N. Ribeiro', 'Cees de Laat']
+        self.assertEqual(self.round_trip(names), names)
+
+
+class AuthorFieldFormTests(TestCase):
+    """
+    #66's other half: the web form split its authors field on commas, so any
+    `"Last, First"` a user pasted became two authors.
+    """
+
+    def form_data(self, **overrides):
+        data = {'bibtex': '', 'title': 'A Paper', 'authors': '', 'link': '', 'year': '2024',
+                'venue': '', 'project_name': '', 'project_uuid': ''}
+        data.update(overrides)
+        return data
+
+    def cleaned_authors(self, authors):
+        form = PublicationForm(data=self.form_data(authors=authors))
+        self.assertTrue(form.is_valid(), msg=form.errors.as_text())
+        return form.cleaned_data['authors']
+
+    def test_one_author_per_line(self):
+        self.assertEqual(
+            self.cleaned_authors('Garegin Grigoryan\nKevin Penkowski\nMinseok Kwon'),
+            ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon'])
+
+    def test_a_pasted_last_comma_first_is_one_author_not_two(self):
+        # The regression this issue exists for.
+        self.assertEqual(self.cleaned_authors('Grigoryan, Garegin'),
+                         ['Garegin Grigoryan'])
+
+    def test_a_comma_inside_a_line_never_splits_it(self):
+        self.assertEqual(
+            self.cleaned_authors('Grigoryan, Garegin\nPenkowski, Kevin'),
+            ['Garegin Grigoryan', 'Kevin Penkowski'])
+
+    def test_semicolons_are_accepted_as_a_separator(self):
+        # e7742605 stored five semicolon-joined names: a user's workaround for the
+        # comma-splitting field. That improvised convention keeps working.
+        self.assertEqual(
+            self.cleaned_authors('Motahare Mounesan; Sourya Saha; Houchao Gan'),
+            ['Motahare Mounesan', 'Sourya Saha', 'Houchao Gan'])
+
+    def test_blank_lines_and_stray_whitespace_are_ignored(self):
+        self.assertEqual(self.cleaned_authors('  Jane Doe  \n\n\n  John Roe\n'),
+                         ['Jane Doe', 'John Roe'])
+
+    def test_order_is_preserved(self):
+        names = ['Zoe Quill', 'Adam Birch', 'Mona Vale', 'Carl Denning']
+        self.assertEqual(self.cleaned_authors('\n'.join(names)), names)
+
+    def test_the_update_form_seeds_the_field_one_per_line(self):
+        names = ['Zoe Quill', 'Adam Birch', 'Mona Vale']
+        form = PublicationForm(authors=names)
+        self.assertEqual(form.initial['authors'], 'Zoe Quill\nAdam Birch\nMona Vale')
+
+    def test_the_form_and_a_pasted_bibtex_agree_on_spelling(self):
+        # resolve_create_fields merges the two sources, so if only one un-inverted, the
+        # stored spelling would depend on which box the user typed in.
+        typed = self.cleaned_authors('Grigoryan, Garegin')
+        parsed = parse_bibtex(
+            '@inproceedings{k2025, title={P4Kube}, year={2025}, '
+            'author={Grigoryan, Garegin}}')['authors']
+        self.assertEqual(typed, parsed)
+
+    def test_split_author_lines_directly(self):
+        self.assertEqual(split_author_lines(''), [])
+        self.assertEqual(split_author_lines('Doe, Jane'), ['Jane Doe'])
+
+
+class Issue66EndToEndTests(TestCase):
+    """The whole path: a BibTeX entry that used to make four rows for three people."""
+
+    def setUp(self):
+        self.api_user = ApiUser.objects.create(uuid='user-1')
+
+    def test_creating_from_the_p4kube_entry_makes_three_authors_in_order(self):
+        publication = create_publication(
+            data={'bibtex': '@inproceedings{Grigoryan_2025, title={P4Kube}, year={2025}, '
+                            'author={Grigoryan, Garegin and Penkowski, Kevin and '
+                            'Kwon, Minseok}}'},
+            api_user=self.api_user)
+        rows = {a.uuid: a for a in Author.objects.filter(uuid__in=publication.authors)}
+        ordered = [rows[u] for u in publication.authors]
+        self.assertEqual([a.author_name for a in ordered],
+                         ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon'])
+        self.assertEqual([a.display_name for a in ordered],
+                         ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon'])
+        self.assertEqual([a.author_order for a in ordered], [0, 1, 2])
+
+    def test_reimporting_a_repaired_publication_does_not_re_break_it(self):
+        # The point of #66: #62's repairs have to survive the next import.
+        publication = create_publication(
+            data={'title': 'FABRIC Testbed from the Eyes of a Network Researcher',
+                  'year': '2023',
+                  'authors': ['Edgard Pontes', 'Cristina K. Dominicini', 'Moises Ribeiro']},
+            api_user=self.api_user)
+        before = [Author.objects.get(uuid=u).author_name for u in publication.authors]
+        reparsed = parse_bibtex(generate_bibtex(publication))['authors']
+        self.assertEqual(reparsed, before)
+
+
+class BibtexMonthMacroTests(SimpleTestCase):
+    """
+    A bare `month=July` used to make a whole entry unreadable.
+
+    BibTeX defines the three-letter macros jan..dec; `common_strings` supplies those, but
+    publisher exports emit the spelled-out names freely and bibtexparser raised
+    UndefinedString on them. parse_bibtex catches everything and returns no fields, so the
+    failure was silent: one word in a field this module does not even store cost the
+    caller the title, the authors and the year. 30 of the 188 stored entries in production
+    were affected -- found while checking #66's round-trip criterion against real data.
+    """
+
+    ENTRY = ('@inproceedings{{Willis_2024, title={{Investigating Data Center Network '
+             'Protocols}}, author={{Willis, Peter and Shenoy, Nirmala}}, year={{2024}}, '
+             'month={0}, booktitle={{ANRW}}}}')
+
+    def test_every_month_spelling_we_have_seen_in_production_parses(self):
+        for month in ('Jan', 'Feb', 'Mar', 'Apr', 'may', 'Jun', 'June', 'Jul', 'July',
+                      'Aug', 'Sep', 'Sept', 'Oct', 'Nov', 'Dec'):
+            with self.subTest(month=month):
+                fields = parse_bibtex(self.ENTRY.format(month))
+                self.assertEqual(fields['authors'], ['Peter Willis', 'Nirmala Shenoy'])
+                self.assertEqual(fields['title'],
+                                 'Investigating Data Center Network Protocols')
+                self.assertEqual(fields['year'], '2024')
+
+    def test_a_real_stored_entry_round_trips(self):
+        # 54876276's actual stored BibTeX, month macro and all. The synthetic entries the
+        # rest of these tests use would not have caught the month bug.
+        entry = ('@inproceedings{Grigoryan_2025, title={P4Kube: In-Network Load Balancer '
+                 'for Kubernetes}, url={http://dx.doi.org/10.1109/ccnc54725.2025.10976037}'
+                 ', DOI={10.1109/ccnc54725.2025.10976037}, booktitle={2025 IEEE 22nd '
+                 'Consumer Communications &amp; Networking Conference (CCNC)}, '
+                 'publisher={IEEE}, author={Grigoryan, Garegin and Penkowski, Kevin and '
+                 'Kwon, Minseok}, year={2025}, month=Jan, pages={1-6} }')
+        self.assertEqual(parse_bibtex(entry)['authors'],
+                         ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon'])
+
+    def test_an_unknown_macro_still_fails_softly(self):
+        # The contract parse_bibtex has always had: no defaults, never an exception.
+        fields = parse_bibtex(self.ENTRY.format('notamonth'))
+        self.assertEqual(fields['authors'], None)
+        self.assertEqual(fields['title'], None)
+
+    def test_one_documents_macros_do_not_leak_into_the_next(self):
+        # A shared parser instance would carry @string definitions across calls.
+        first = parse_bibtex('@string{mine = "Some Venue"}\n'
+                             '@article{a, title={A}, year={2024}, '
+                             'author={Doe, Jane}, journal=mine}')
+        self.assertEqual(first['venue'], 'Some Venue')
+        second = parse_bibtex('@article{b, title={B}, year={2024}, '
+                              'author={Roe, John}, journal=mine}')
+        self.assertIsNone(second['title'])

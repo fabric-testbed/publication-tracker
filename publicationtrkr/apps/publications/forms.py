@@ -1,3 +1,5 @@
+import re
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
@@ -5,8 +7,39 @@ from django.forms import CheckboxSelectMultiple
 
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.apiuser.models import ApiUser
-from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
+from publicationtrkr.apps.publications.utils.bibtex_utils import (
+    normalize_author_name,
+    parse_bibtex,
+)
 from publicationtrkr.apps.publications.utils.publication_builder import resolve_create_fields
+
+
+# The separators a human can use between authors. A comma is deliberately NOT one of
+# them: it is the separator inside a single BibTeX name ("Grigoryan, Garegin"), so
+# splitting on it turned one author into two -- which is half of #66 and most of what #62
+# had to repair. Newline is the documented shape; semicolon is accepted because a user
+# faced with the old comma-splitting field already reached for it as a workaround, and
+# that improvised convention is now stored on e7742605.
+AUTHOR_SEPARATORS = re.compile(r'[\n\r;]+')
+
+
+def split_author_lines(value: str) -> list:
+    """
+    One author per line, in the order given, un-inverting any "Last, First" line.
+
+    The un-inversion matters for agreement rather than for tidiness: the same publication
+    can be built from this field or from a pasted BibTeX entry, and resolve_create_fields
+    merges the two. If only one side un-inverted, the stored spelling would depend on
+    which box the user happened to type in.
+    """
+    if not value:
+        return []
+    names = []
+    for line in AUTHOR_SEPARATORS.split(value):
+        name = normalize_author_name(line)
+        if name:
+            names.append(name)
+    return names
 
 
 class PublicationForm(forms.ModelForm):
@@ -56,9 +89,9 @@ class PublicationForm(forms.ModelForm):
     )
 
     authors = forms.CharField(
-        widget=forms.Textarea(attrs={'rows': 3, 'cols': 60}),
+        widget=forms.Textarea(attrs={'rows': 6, 'cols': 60}),
         required=False,
-        label='Authors (comma separated) *',
+        label='Authors -- one per line, in the order they appear on the publication *',
     )
 
     project_name = forms.CharField(
@@ -76,7 +109,7 @@ class PublicationForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         authors = kwargs.pop('authors', [])
         super().__init__(*args, **kwargs)
-        self.initial['authors'] = ', '.join(str(a) for a in authors)
+        self.initial['authors'] = '\n'.join(str(a) for a in authors)
 
     def clean(self):
         cleaned_data = super().clean()
@@ -85,14 +118,12 @@ class PublicationForm(forms.ModelForm):
         bibtex_string = cleaned_data.get('bibtex', '')
         bibtex_data = parse_bibtex(bibtex_string) if bibtex_string else {}
 
-        # The form's own input shape: authors arrive as one comma-separated string,
-        # and every text field is stripped before it is compared with the BibTeX
-        # default. Everything after that is the shared "manual overrides BibTeX"
-        # merge, so the form and the API cannot drift again.
+        # The form's own input shape: one author per line. Everything after that is the
+        # shared "manual overrides BibTeX" merge, so the form and the API cannot drift
+        # again.
         manual = {name: value.strip() if isinstance(value, str) else value
                   for name, value in cleaned_data.items()}
-        authors_raw = manual.get('authors', '')
-        manual['authors'] = [a.strip() for a in authors_raw.split(',') if a.strip()] if authors_raw else []
+        manual['authors'] = split_author_lines(manual.get('authors', ''))
 
         resolved = resolve_create_fields(manual, bibtex_data)
 
