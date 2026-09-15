@@ -25,6 +25,11 @@ withdraw them anyway -- a claimed author is no longer scored, so its suggestions
 **Withdrawal only ever touches `suggested` rows.** A decision is never removed by code:
 rejections are the only record of what an admin has already ruled out, and they are what
 stops a pair being re-suggested every night.
+
+relocate_claims() is the one function here that decides nothing. It moves an existing
+decision between two Author rows when a data repair has to renumber a publication's
+authors (#62), and it lives here so that the rule above -- a decision is never removed --
+holds for the repair path too.
 """
 
 from datetime import datetime, timezone
@@ -187,3 +192,41 @@ def record_admin_claim(author, fabric_uuid, *, decided_by) -> AuthorClaim | None
     )
     withdraw_suggestions(author, keep_api_user_id=api_user.id)
     return claim
+
+
+@transaction.atomic
+def relocate_claims(*, source, destination, api_user) -> int:
+    """
+    Move one person's claims from one Author row to another, and return how many moved.
+
+    This is the repair case the ledger had no verb for (issue #62). A publication whose
+    author list was mis-parsed can end up with the right person attached to the wrong
+    slot -- `e64374e0` stored "Bjoern Sagstad" twice where the paper prints "Bang,
+    Hyunsuk" second and "Sagstad, Bjoern" third, so Bjoern's self-assertion sits on the
+    row that has to become Hyunsuk Bang. Renaming that row in place would hand Bjoern's
+    claim to a different person; letting the repair drop it would destroy the claim. The
+    row that survives is a different row, so the claim has to move to it.
+
+    What this deliberately does *not* do is re-decide anything. The claim row keeps its
+    uuid, its `created`, its status and its source, so a `self_asserted` claim is still
+    self-asserted afterwards. That is the reason this exists rather than "clear it here,
+    call record_admin_claim() there": the admin path would rewrite the pair as
+    `approved`/`admin` and the evidence that the person claimed themselves would be gone.
+
+    `Author.fabric_uuid` is the caller's business, not this function's -- the caller
+    knows the whole publication's target attribution and has to move every row before
+    any one row is consistent. This moves the ledger rows only.
+
+    A `suggested` row already standing on the destination for the same person is
+    withdrawn first, because the unique constraint is on (author, api_user) and a
+    suggestion is exactly what a decided claim supersedes. Withdrawal only ever touches
+    `suggested` rows, here as everywhere else in this module.
+    """
+    if source.pk == destination.pk:
+        return 0
+    AuthorClaim.objects.filter(
+        author=destination, api_user=api_user, status=AuthorClaim.SUGGESTED
+    ).delete()
+    return AuthorClaim.objects.filter(author=source, api_user=api_user).update(
+        author=destination
+    )

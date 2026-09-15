@@ -1,0 +1,1002 @@
+{
+  "issue": 62,
+  "publications": [
+    {
+      "publication_uuid": "6e1700df-cbf9-468b-95ae-585652b19d72",
+      "note": "#62 A: hand-entered, no BibTeX. ProQuest record verified; sole author confirmed. Degree type taken from ProQuest's dissertation classification.",
+      "expect_authors": [
+        "Justin Corbin Presley"
+      ],
+      "authors": [
+        {
+          "name": "Justin Corbin Presley",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@phdthesis{presley2023federated,\n  author = {Presley, Justin Corbin},\n  title = {A Federated Data Repository Using Named Data Networking},\n  school = {Tennessee Technological University},\n  year = {2023},\n  note = {ProQuest Dissertations and Theses, document ID 30569527},\n  url = {https://search.proquest.com/openview/d06f45ffdf16b1e8da7078e2b326cc5b/1?pq-origsite=gscholar&cbl=18750&diss=y}\n}"
+      }
+    },
+    {
+      "publication_uuid": "0071f080-3d58-4b21-8084-3cb78669af2b",
+      "note": "#62 A: hand-entered, no BibTeX and no link. Published in EPJ Web of Conferences 337 (2025) from CHEP 2024; Crossref and INSPIRE-HEP agree with our author list and order exactly. year moves 2024 -> 2025 to match the record of publication.",
+      "expect_authors": [
+        "Ilija Vukotic",
+        "Fengping Hu",
+        "Lincoln Bryant",
+        "Robert William Gardner Jr.",
+        "Shawn McKee",
+        "Judith Stephen",
+        "David Jordan"
+      ],
+      "authors": [
+        {
+          "name": "Ilija Vukotic",
+          "fabric_uuid": "faf4d159-7306-4141-97ab-0bfe1ccc9584"
+        },
+        {
+          "name": "Fengping Hu",
+          "fabric_uuid": "428ba70c-b955-4741-81ff-1e08e22ff9d6"
+        },
+        {
+          "name": "Lincoln Bryant",
+          "fabric_uuid": "dff8f083-4ccb-4182-9f13-5c9257b54710"
+        },
+        {
+          "name": "Robert William Gardner Jr.",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Shawn McKee",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Judith Stephen",
+          "fabric_uuid": "af160953-07de-457a-b894-4c90618a5be4"
+        },
+        {
+          "name": "David Jordan",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@inproceedings{vukotic2025investigating,\n  author = {Vukotic, Ilija and Hu, Fengping and Bryant, Lincoln and Gardner Jr., Robert William and McKee, Shawn and Stephen, Judith and Jordan, David},\n  title = {Investigating Data Access Models for ATLAS: A Case Study with FABRIC Across Borders and ServiceX},\n  booktitle = {EPJ Web of Conferences},\n  volume = {337},\n  pages = {01117},\n  year = {2025},\n  doi = {10.1051/epjconf/202533701117},\n  url = {https://doi.org/10.1051/epjconf/202533701117},\n  note = {Proceedings of the 27th International Conference on Computing in High Energy and Nuclear Physics (CHEP 2024), Krakow, Poland}\n}",
+        "link": "https://doi.org/10.1051/epjconf/202533701117",
+        "year": "2025"
+      }
+    },
+    {
+      "publication_uuid": "961a3da7-01dd-428b-9306-83a50a4641ff",
+      "note": "#62 A: hand-entered, no BibTeX. Clemson TigerPrints record verified; it is an M.S. thesis, so @mastersthesis. Advisor is not a co-author.",
+      "expect_authors": [
+        "Daniel Pendleton"
+      ],
+      "authors": [
+        {
+          "name": "Daniel Pendleton",
+          "fabric_uuid": "dc418edd-44ad-449a-800a-fed291ffbfc9"
+        }
+      ],
+      "fields": {
+        "bibtex": "@mastersthesis{pendleton2024multidomain,\n  author = {Pendleton, Daniel},\n  title = {Multi-Domain Secure DDS Networks for Aerial and Ground Vehicle Communications},\n  school = {Clemson University},\n  year = {2024},\n  month = may,\n  note = {M.S. thesis, Electrical Engineering; TigerPrints All Theses, paper 4327},\n  url = {https://tigerprints.clemson.edu/cgi/viewcontent.cgi?article=5326&context=all_theses}\n}"
+      }
+    },
+    {
+      "publication_uuid": "0201db48-b469-4052-83bd-6d71f2c36f71",
+      "note": "#62 A: hand-entered, no BibTeX. ACM/Crossref author list and order match ours exactly, including \"Cees de Laat\" lowercase on this paper.",
+      "expect_authors": [
+        "Anestis Dalgkitsis",
+        "Cyril Hsu",
+        "Chrysa Papagianni",
+        "Paola Grosso",
+        "Cees de Laat"
+      ],
+      "authors": [
+        {
+          "name": "Anestis Dalgkitsis",
+          "fabric_uuid": "5d99bce9-8c7b-4185-93df-da5b1f95cd40"
+        },
+        {
+          "name": "Cyril Hsu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Chrysa Papagianni",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Paola Grosso",
+          "fabric_uuid": "8608e972-3678-48df-98b0-7f74c83c0300"
+        },
+        {
+          "name": "Cees de Laat",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@inproceedings{dalgkitsis2025llm,\n  author = {Dalgkitsis, Anestis and Hsu, Cyril and Papagianni, Chrysa and Grosso, Paola and de Laat, Cees},\n  title = {LLM-based Optimization Algorithm Selection for High-Performance Networks Orchestration},\n  booktitle = {Proceedings of the SC '25 Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis},\n  year = {2025},\n  pages = {854--859},\n  doi = {10.1145/3731599.3767458},\n  url = {https://doi.org/10.1145/3731599.3767458}\n}"
+      }
+    },
+    {
+      "publication_uuid": "01f6113e-b51a-4975-a2bf-44795fad4f8d",
+      "note": "#62 A: hand-entered, no BibTeX. CUNY Academic Works record verified; sole author, PhD dissertation.",
+      "expect_authors": [
+        "Motahare Mounesan"
+      ],
+      "authors": [
+        {
+          "name": "Motahare Mounesan",
+          "fabric_uuid": "2cb05026-2858-4098-afe1-e1143e1a7a03"
+        }
+      ],
+      "fields": {
+        "bibtex": "@phdthesis{mounesan2025reinforcement,\n  author = {Mounesan, Motahare},\n  title = {Reinforcement Learning Based Resource Management in Edge Systems},\n  school = {The Graduate Center, City University of New York},\n  year = {2025},\n  url = {https://academicworks.cuny.edu/gc_etds/6502}\n}"
+      }
+    },
+    {
+      "publication_uuid": "02529745-a5dc-40c2-a70d-ce56f9c57425",
+      "note": "#62 A + C: hand-entered, no BibTeX. Author list and order confirmed. The \"Cees De Laat\" capitalisation is left as stored: one reading of the camera-ready title page says the paper prints the capital D, while Semantic Scholar's record for the same DOI and his own standing spelling (UvA, DBLP) are lowercase, and ACM DL could not be fetched to settle it. An unverified change to a person's name is worse than leaving the stored form alone; flagged on #62 for a manual look.",
+      "expect_authors": [
+        "Inder Monga",
+        "Mazahir Hussain",
+        "Justas Balcas",
+        "Aashay Arora",
+        "Diego Davila",
+        "Buseung Cho",
+        "Xi Yang",
+        "Cees De Laat"
+      ],
+      "authors": [
+        {
+          "name": "Inder Monga",
+          "fabric_uuid": "22f5052e-a70e-46ce-89d3-1172687982cd"
+        },
+        {
+          "name": "Mazahir Hussain",
+          "fabric_uuid": "e227d06d-7ddf-4c12-af9f-be1dcfb3be77"
+        },
+        {
+          "name": "Justas Balcas",
+          "fabric_uuid": "91f5ecc3-16ff-4f09-95ac-dfeee0c3b1e3"
+        },
+        {
+          "name": "Aashay Arora",
+          "fabric_uuid": "113f0827-14e5-41d4-bab0-3b5b52525fad"
+        },
+        {
+          "name": "Diego Davila",
+          "fabric_uuid": "143e09f9-4dc4-4f4b-acd3-75381565ffa2"
+        },
+        {
+          "name": "Buseung Cho",
+          "fabric_uuid": "1adafe08-7b8c-4aa8-afaf-3be27c35dbf7"
+        },
+        {
+          "name": "Xi Yang",
+          "fabric_uuid": "3c645ca8-037a-4472-9798-698e985c5155"
+        },
+        {
+          "name": "Cees De Laat",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@inproceedings{monga2025sense,\n  author = {Monga, Inder and Hussain, Mazahir and Balcas, Justas and Arora, Aashay and Davila, Diego and Cho, Buseung and Yang, Xi and De Laat, Cees},\n  title = {SENSE in Practice: Quantifying the End-to-End Benefits of Intent-Based Bandwidth Reservation for Exascale Science Workflows},\n  booktitle = {Proceedings of the SC '25 Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis},\n  year = {2025},\n  pages = {875--885},\n  doi = {10.1145/3731599.3767454},\n  url = {https://doi.org/10.1145/3731599.3767454}\n}"
+      }
+    },
+    {
+      "publication_uuid": "8297dc98-27a6-4aaa-a69a-7595eac0d4a0",
+      "note": "#62 A: hand-entered, no BibTeX. Politecnico di Torino webthesis record verified; sole author, relatori are not co-authors.",
+      "expect_authors": [
+        "Giandomenico Lacatena"
+      ],
+      "authors": [
+        {
+          "name": "Giandomenico Lacatena",
+          "fabric_uuid": "5545d4ed-9bc1-495f-bfdc-10e7b9a87595"
+        }
+      ],
+      "fields": {
+        "bibtex": "@mastersthesis{lacatena2026adaptive,\n  author = {Lacatena, Giandomenico},\n  title = {Adaptive Layer Placement for Pipeline-Parallel LLM Inference at the Edge},\n  school = {Politecnico di Torino},\n  year = {2026},\n  note = {Corso di Laurea Magistrale in Ingegneria Informatica (LM-32)},\n  url = {https://webthesis.biblio.polito.it/39911/}\n}"
+      }
+    },
+    {
+      "publication_uuid": "54876276-8c6b-47c7-8206-af3102769710",
+      "note": "#62 B: 4 rows for 3 people -- parse_bibtex split \"Grigoryan, Garegin\" on the comma. Kevin Penkowski's self-assertion moves from slot 2 to slot 1.",
+      "expect_authors": [
+        "Grigoryan",
+        "Garegin",
+        "Kevin Penkowski",
+        "Minseok Kwon"
+      ],
+      "authors": [
+        {
+          "name": "Garegin Grigoryan",
+          "fabric_uuid": "99aa6184-7ffc-45b3-a725-a5694efb88c1"
+        },
+        {
+          "name": "Kevin Penkowski",
+          "fabric_uuid": "0e9e7a6c-f924-4767-bfff-e992d964cbdc"
+        },
+        {
+          "name": "Minseok Kwon",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "907bd5bf-ebb1-42ae-b260-fb0745a46aa6",
+      "note": "#62 B: 5 rows for 4 people, each straddling a name boundary. Larissa Ferreira Rodrigues Moreira's self-assertion moves from slot 2 to slot 1.",
+      "expect_authors": [
+        "Rodrigues",
+        "Leonardo Gabriel Ferreira and Rodrigues Moreira",
+        "Larissa Ferreira and Moreira",
+        "Rodrigo and Backes",
+        "André Ricardo"
+      ],
+      "authors": [
+        {
+          "name": "Leonardo Gabriel Ferreira Rodrigues",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Larissa Ferreira Rodrigues Moreira",
+          "fabric_uuid": "5ebe8ef6-c4fd-4f08-a6d0-adbef5a245a9"
+        },
+        {
+          "name": "Rodrigo Moreira",
+          "fabric_uuid": null
+        },
+        {
+          "name": "André Ricardo Backes",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "e7742605-4dd9-458c-9c7d-07e54ba44b90",
+      "note": "#62 B: all five authors in one semicolon-separated row -- a human workaround for the comma-splitting form field. No attribution on the row, so nothing moves.",
+      "expect_authors": [
+        "Motahare Mounesan; Sourya Saha; Houchao Gan; Md. Nurul Absur; Saptarshi Debroy"
+      ],
+      "authors": [
+        {
+          "name": "Motahare Mounesan",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Sourya Saha",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Houchao Gan",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Md. Nurul Absur",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Saptarshi Debroy",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "aef4e78c-3f96-4b22-9a66-29352ad1f90e",
+      "note": "#62 B: second author stored as the literal \"others\" -- BibTeX et al. taken for a person. Frontiers article page gives all nine authors in order; the corrigendum (10.3389/fcpxs.2026.1919371) changed affiliations only, not the byline.",
+      "expect_authors": [
+        "Xavier Casas-Moreno",
+        "others"
+      ],
+      "authors": [
+        {
+          "name": "Xavier Casas-Moreno",
+          "fabric_uuid": "aad44ad6-f078-49d4-9dd3-5d84f48d8ec1"
+        },
+        {
+          "name": "Komal Thareja",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Pablo de Juan Vela",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rajiv Mayani",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Josep Fanals-i-Batllori",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Anirban Mandal",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Ewa Deelman",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rosa M. Badia",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Francesc Lordan",
+          "fabric_uuid": null
+        }
+      ],
+      "fields": {
+        "bibtex": "@article{casasmoreno2026decentralized,\n  author = {Casas-Moreno, Xavier and Thareja, Komal and de Juan Vela, Pablo and Mayani, Rajiv and Fanals-i-Batllori, Josep and Mandal, Anirban and Deelman, Ewa and Badia, Rosa M. and Lordan, Francesc},\n  title = {Decentralized coordination of autonomous agents in the Compute Continuum using consensus},\n  journal = {Frontiers in Complex Systems},\n  volume = {4},\n  year = {2026},\n  pages = {1800101},\n  doi = {10.3389/fcpxs.2026.1800101},\n  url = {https://www.frontiersin.org/journals/complex-systems/articles/10.3389/fcpxs.2026.1800101/full}\n}"
+      }
+    },
+    {
+      "publication_uuid": "949bbdbc-9920-4a81-8df6-28cf1e9290f2",
+      "note": "#62 B: \"Joshna | Kurra\" is two rows for Joshna Kurra. Zongming Fei moves 3 -> 2 and James Griffioen 4 -> 3; without the move the trailing row that _sync_authors deletes would take Griffioen's self-assertion with it.",
+      "expect_authors": [
+        "Mami Hayashida",
+        "Joshna",
+        "Kurra",
+        "Zongming Fei",
+        "James Griffioen"
+      ],
+      "authors": [
+        {
+          "name": "Mami Hayashida",
+          "fabric_uuid": "e4fbe541-1780-4fa9-8623-f6e84a84f7d1"
+        },
+        {
+          "name": "Joshna Kurra",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Zongming Fei",
+          "fabric_uuid": "2617ea2d-eb62-4a08-a815-7ab611cebf13"
+        },
+        {
+          "name": "James Griffioen",
+          "fabric_uuid": "fb534c1a-d79e-4552-9d61-de6717f66639"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "e64374e0-504c-4b86-883a-757c1a28d68c",
+      "note": "#62 B: \"Bjoern Sagstad\" twice. The paper prints \"Bang, Hyunsuk\" second, so slot 1 becomes Hyunsuk Bang and Bjoern's self-assertion moves to slot 2, where his name actually is. The stale machine suggestion for him on slot 2 is withdrawn.",
+      "expect_authors": [
+        "Nishanth Shyamkumar",
+        "Bjoern Sagstad",
+        "Bjoern Sagstad",
+        "Prajwal Somendyapanahalli Venkateshmurthy",
+        "Sean Cummings",
+        "Nik Sultana"
+      ],
+      "authors": [
+        {
+          "name": "Nishanth Shyamkumar",
+          "fabric_uuid": "bc1ce1df-bf7e-43e9-881e-5f10fa5c7221"
+        },
+        {
+          "name": "Hyunsuk Bang",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Bjoern Sagstad",
+          "fabric_uuid": "dd4758aa-bf6a-469b-9c49-a1e652719d23"
+        },
+        {
+          "name": "Prajwal Somendyapanahalli Venkateshmurthy",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Sean Cummings",
+          "fabric_uuid": "0e3348bd-f085-4c5f-a520-3170b705e8c4"
+        },
+        {
+          "name": "Nik Sultana",
+          "fabric_uuid": "83b7a00c-fd23-43e7-82fa-af68411d270f"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "0f782f94-d9b8-43ca-ad9d-d4943ea5e555",
+      "note": "#62 B: \"Rodrigo Moreira\" twice, and all three attributions are one slot out of step -- slot 0 carried Larissa's fabric_uuid under Rodrigo's name. The paper prints Moreira, Rodrigues Moreira, de Oliveira Silva; the three claims rotate to match.",
+      "expect_authors": [
+        "Rodrigo Moreira",
+        "Flávio de Oliveira Silva",
+        "Rodrigo Moreira"
+      ],
+      "authors": [
+        {
+          "name": "Rodrigo Moreira",
+          "fabric_uuid": "e3db75e1-16f0-4ae6-956c-c5df973bae30"
+        },
+        {
+          "name": "Larissa F. Rodrigues Moreira",
+          "fabric_uuid": "5ebe8ef6-c4fd-4f08-a6d0-adbef5a245a9"
+        },
+        {
+          "name": "Flávio de Oliveira Silva",
+          "fabric_uuid": "f3c19ffa-a28a-4e2c-b8a7-edfd056a7c85"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "57898a00-27ee-4dd8-a9d4-0d230a24a3e8",
+      "note": "#62 A + B: initials-only list, no BibTeX and no link. USC CyberInfra Lab confirms five authors; contrary to #62's guess \"A. GSPN\" and \"A. G. B. Sai\" are two different people (Amith Gorthi Srinivasa Prabhakara Narasimha, Akhil Gorthi Bala Sai). BibTeX and link stay null until IEEE Xplore indexes BlackSeaCom 2026.",
+      "expect_authors": [
+        "A. GSPN",
+        "A. G. B. Sai",
+        "S. Choueiri",
+        "E. Kfoury",
+        "J. Crichigno"
+      ],
+      "authors": [
+        {
+          "name": "Amith Gorthi Srinivasa Prabhakara Narasimha",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Akhil Gorthi Bala Sai",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Samia Choueiri",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Elie Kfoury",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Jorge Crichigno",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "1d67ed23-d557-4aee-97f1-75f7303b9cee",
+      "note": "#62 B: flagged for verification. \"Amith Gorthi Srinivasa Prabhakara Narasimha\" matches the stored BibTeX (\"Srinivasa Prabhakara Narasimha, Amith Gorthi\") and the IEEE record. No change.",
+      "expect_authors": [
+        "Amith Gorthi Srinivasa Prabhakara Narasimha",
+        "Ali Mazloum",
+        "Samia Choueiri",
+        "Sergio Elizalde",
+        "Elie Kfoury",
+        "Jorge Crichigno"
+      ],
+      "authors": [
+        {
+          "name": "Amith Gorthi Srinivasa Prabhakara Narasimha",
+          "fabric_uuid": "b01a1856-e5ff-4619-8fc9-634ecbf03c66"
+        },
+        {
+          "name": "Ali Mazloum",
+          "fabric_uuid": "33ea9c07-43ed-45f1-b040-01c7d920d295"
+        },
+        {
+          "name": "Samia Choueiri",
+          "fabric_uuid": "78504735-b34f-42a8-be20-8e71d6acf13e"
+        },
+        {
+          "name": "Sergio Elizalde",
+          "fabric_uuid": "d2d0e6f8-afc6-44ea-b580-195486fda319"
+        },
+        {
+          "name": "Elie Kfoury",
+          "fabric_uuid": "e1a5a91e-0a60-4e75-9784-ee40f7a26577"
+        },
+        {
+          "name": "Jorge Crichigno",
+          "fabric_uuid": "d2dde53e-ab47-4693-94ee-eb0c1f31160f"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "a8a61f2b-f590-4c54-a2a3-f8b83194b897",
+      "note": "#62 B: flagged for verification. \"Prajwal Somendyapanahalli Venkateshmurthy\" matches the stored BibTeX and the ACM record. No change.",
+      "expect_authors": [
+        "Alexander Wolosewicz",
+        "Prajwal Somendyapanahalli Venkateshmurthy",
+        "Nik Sultana"
+      ],
+      "authors": [
+        {
+          "name": "Alexander Wolosewicz",
+          "fabric_uuid": "30a258a1-6bed-43e7-a6bc-29d00bcaeb55"
+        },
+        {
+          "name": "Prajwal Somendyapanahalli Venkateshmurthy",
+          "fabric_uuid": "675fd26f-2178-46ca-8609-b2f80b60f593"
+        },
+        {
+          "name": "Nik Sultana",
+          "fabric_uuid": "83b7a00c-fd23-43e7-82fa-af68411d270f"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "f23daf84-649b-4fa0-bed1-49d043a67baa",
+      "note": "#62 C: \"Jorge Crichign\" is a typo -- the row already carries Jorge Crichigno's fabric_uuid, its own stored BibTeX says \"Crichigno, Jorge\", and the correct spelling appears on 14 other publications here. Attribution does not move.",
+      "expect_authors": [
+        "Jose Gomez",
+        "Elie Kfoury",
+        "Jorge Crichign",
+        "Gautam Srivastava"
+      ],
+      "authors": [
+        {
+          "name": "Jose Gomez",
+          "fabric_uuid": "bfbc2536-8bb0-4cdc-bda3-b091d8949419"
+        },
+        {
+          "name": "Elie Kfoury",
+          "fabric_uuid": "e1a5a91e-0a60-4e75-9784-ee40f7a26577"
+        },
+        {
+          "name": "Jorge Crichigno",
+          "fabric_uuid": "d2dde53e-ab47-4693-94ee-eb0c1f31160f"
+        },
+        {
+          "name": "Gautam Srivastava",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "04c73a56-6a0d-4862-88ac-12e8c9b7a283",
+      "note": "#62 C: \"Alicia Esquivel-Morel\" vs \"Alicia Esquivel Morel\" is a real conflict, not a typo. IEEE's own Crossref metadata for this DOI and Semantic Scholar both hyphenate; her own CV -- which cites this paper -- and her IEEE author profile do not, and IEEE holds two author IDs for her. Left as stored (hyphenated, matching this paper's registered metadata) and flagged on #62 for a manual look at the live byline.",
+      "expect_authors": [
+        "Chengyi Qu",
+        "Rounak Singh",
+        "Alicia Esquivel-Morel",
+        "Prasad Calyam"
+      ],
+      "authors": [
+        {
+          "name": "Chengyi Qu",
+          "fabric_uuid": "97e72680-cf0c-426e-9e35-2fe1ca695ff1"
+        },
+        {
+          "name": "Rounak Singh",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Alicia Esquivel-Morel",
+          "fabric_uuid": "b982722f-d807-4d71-bc0e-a30b87b38680"
+        },
+        {
+          "name": "Prasad Calyam",
+          "fabric_uuid": "341a5651-1d4f-4061-872f-56e2135dbdb9"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "dcb2918e-23dd-4688-896d-d2374dcb0473",
+      "note": "#62 C: \"Everson S. Borges\" and \"Cristina K. Dominicini\" are the forms this paper prints, and the ones 54051843 is corrected towards. No change.",
+      "expect_authors": [
+        "Everson S. Borges",
+        "Willen Borges Coelho",
+        "Fabricio Rodríguez Cesen",
+        "Francisco Germano Vogt",
+        "Christian Esteve Rothenberg",
+        "Rodolfo da Silva Villaça",
+        "Cristina K. Dominicini",
+        "Rafael S. Guimarães",
+        "Magnos Martinello"
+      ],
+      "authors": [
+        {
+          "name": "Everson S. Borges",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Willen Borges Coelho",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Fabricio Rodríguez Cesen",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Francisco Germano Vogt",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Christian Esteve Rothenberg",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rodolfo da Silva Villaça",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Cristina K. Dominicini",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rafael S. Guimarães",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Magnos Martinello",
+          "fabric_uuid": "aea0201f-dd88-4324-8a73-57446b3b9e8a"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "6e09a709-ba33-47f7-8e23-f82a1a2566d8",
+      "note": "#62 C: \"James B. Kowalkowski\" is what this paper prints (\"Kowalkowski, James B.\"); the bare \"James Kowalkowski\" elsewhere is a different paper's byline. No change. Separately, this record's `link` column holds the paper's title instead of a URL -- out of scope for #62, filed as a follow-up.",
+      "expect_authors": [
+        "Nik Sultana",
+        "Yatish Kumar",
+        "Chin Guok",
+        "James B. Kowalkowski",
+        "Michael H. L. S. Wang"
+      ],
+      "authors": [
+        {
+          "name": "Nik Sultana",
+          "fabric_uuid": "83b7a00c-fd23-43e7-82fa-af68411d270f"
+        },
+        {
+          "name": "Yatish Kumar",
+          "fabric_uuid": "f7eadb5b-c033-4893-8499-dda161b9db66"
+        },
+        {
+          "name": "Chin Guok",
+          "fabric_uuid": null
+        },
+        {
+          "name": "James B. Kowalkowski",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Michael H. L. S. Wang",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "0fa1619f-adab-4d2d-9112-f0a89fafdc81",
+      "note": "#62 C: \"Md. Nurul Absur\" with the full stop is what this paper prints. No change.",
+      "expect_authors": [
+        "Sourya Saha",
+        "Md. Nurul Absur",
+        "Shima Yousefi",
+        "Saptarshi Debroy"
+      ],
+      "authors": [
+        {
+          "name": "Sourya Saha",
+          "fabric_uuid": "e4a3f938-338d-4f37-bb01-b3767286a6fd"
+        },
+        {
+          "name": "Md. Nurul Absur",
+          "fabric_uuid": "e21014b9-af59-4968-9039-f7a2f21e7a30"
+        },
+        {
+          "name": "Shima Yousefi",
+          "fabric_uuid": "a1072956-d8c4-489b-863e-d725bd58cc01"
+        },
+        {
+          "name": "Saptarshi Debroy",
+          "fabric_uuid": "c8ff2597-c5e1-452c-93bd-96ae513a18a6"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "3beb0175-c769-444b-a4d9-a0ff914b40fd",
+      "note": "#62 C: \"Md. Nurul Absur\" with the full stop is what this paper prints. No change.",
+      "expect_authors": [
+        "Sourya Saha",
+        "Md. Nurul Absur",
+        "Saptarshi Debroy"
+      ],
+      "authors": [
+        {
+          "name": "Sourya Saha",
+          "fabric_uuid": "e4a3f938-338d-4f37-bb01-b3767286a6fd"
+        },
+        {
+          "name": "Md. Nurul Absur",
+          "fabric_uuid": "e21014b9-af59-4968-9039-f7a2f21e7a30"
+        },
+        {
+          "name": "Saptarshi Debroy",
+          "fabric_uuid": "c8ff2597-c5e1-452c-93bd-96ae513a18a6"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "f2379ea7-ceb2-4a1d-8729-b8275b7cc5e6",
+      "note": "#62 C: \"Moises R.N. Ribeiro\" unspaced is what Elsevier prints for this article. No change.",
+      "expect_authors": [
+        "Rodrigo Moreira",
+        "Rodolfo S. Villaça",
+        "Moisés R.N. Ribeiro",
+        "Joberto S.B. Martins",
+        "João Henrique Corrêa",
+        "Tereza C. Carvalho",
+        "Flávio de Oliveira Silva"
+      ],
+      "authors": [
+        {
+          "name": "Rodrigo Moreira",
+          "fabric_uuid": "e3db75e1-16f0-4ae6-956c-c5df973bae30"
+        },
+        {
+          "name": "Rodolfo S. Villaça",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Moisés R.N. Ribeiro",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Joberto S.B. Martins",
+          "fabric_uuid": null
+        },
+        {
+          "name": "João Henrique Corrêa",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Tereza C. Carvalho",
+          "fabric_uuid": "2992c013-e2c7-44f1-af67-1c1d37155760"
+        },
+        {
+          "name": "Flávio de Oliveira Silva",
+          "fabric_uuid": "f3c19ffa-a28a-4e2c-b8a7-edfd056a7c85"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "8b0b4cb1-045f-4ef5-8d78-71649e424659",
+      "note": "#62 C: \"Shivendra S. Panwar\" is what this paper prints (\"Panwar, Shivendra S.\"). No change.",
+      "expect_authors": [
+        "Ashutosh Srivastava",
+        "Fraida Fund",
+        "Shivendra S. Panwar"
+      ],
+      "authors": [
+        {
+          "name": "Ashutosh Srivastava",
+          "fabric_uuid": "7e634440-260c-42a7-a708-1552b8be0c66"
+        },
+        {
+          "name": "Fraida Fund",
+          "fabric_uuid": "20dc5877-64b2-4543-856b-5a42d4328393"
+        },
+        {
+          "name": "Shivendra S. Panwar",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "bab94058-3a0b-45c4-bc2b-e02937d6e8cc",
+      "note": "#62 C: \"Shivendra S. Panwar\" is what this paper prints (\"Panwar, Shivendra S.\"). No change.",
+      "expect_authors": [
+        "Ilknur Aydin",
+        "Fraida Fund",
+        "Shivendra S. Panwar"
+      ],
+      "authors": [
+        {
+          "name": "Ilknur Aydin",
+          "fabric_uuid": "d96f1543-1323-4163-8daf-0ac8f8c4b010"
+        },
+        {
+          "name": "Fraida Fund",
+          "fabric_uuid": "20dc5877-64b2-4543-856b-5a42d4328393"
+        },
+        {
+          "name": "Shivendra S. Panwar",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "b36d0a62-f35d-4896-a53d-1b956cc6f84a",
+      "note": "#62 A/C: #62 assumed \"Nik Sultan\" was a typo for Nik Sultana. It is not -- the venue prints \"Nik Sultan\", and the title really does end \"NSF FABRIC Tested\". The co-author block appears verbatim on an unrelated paper in a sister h-tsp.com journal, the venue is in no index and has no DOI. Renaming this to Nik Sultana would credit a FABRIC researcher with a paper that is very likely not his, so the record is left exactly as printed and no BibTeX is stored. Flagged on #62 for a decision about whether it belongs in the tracker at all.",
+      "expect_authors": [
+        "Nik Sultan",
+        "JiaJia Chew",
+        "Xianggang Wei",
+        "Neal Patwar",
+        "Jingwei Liu",
+        "Rui Du"
+      ],
+      "authors": [
+        {
+          "name": "Nik Sultan",
+          "fabric_uuid": null
+        },
+        {
+          "name": "JiaJia Chew",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Xianggang Wei",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Neal Patwar",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Jingwei Liu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rui Du",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "30145e8d-c93f-4e45-a027-8ada2471cf3e",
+      "note": "#62 A: no BibTeX and no link, and none can be sourced. Tennessee Tech deposits via ProQuest ETD Administrator, which is not publicly indexed; the NGIN Lab alumni page corroborates a Xi Wang PhD there 2021-2025 on decentralized replication but paraphrases rather than cites the title. Recorded reason for the remaining null: the ProQuest document number from TTU Graduate Studies would settle it.",
+      "expect_authors": [
+        "Xi Wang"
+      ],
+      "authors": [
+        {
+          "name": "Xi Wang",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "99c99706-6e4b-4e3e-8f79-39db17f7195e",
+      "note": "#62 C: \"Rodriges\" is a typo, but not ours -- the article as published prints it, and so does the BibTeX we inherited. Springer issued a formal correction (10.1007/s10278-025-01647-8): \"The first author's name is Larissa F. Rodrigues Moreira\". The author row is corrected; the stored BibTeX is left as the publisher supplied it.",
+      "expect_authors": [
+        "Larissa Ferreira Rodriges Moreira",
+        "André Ricardo Backes"
+      ],
+      "authors": [
+        {
+          "name": "Larissa Ferreira Rodrigues Moreira",
+          "fabric_uuid": null
+        },
+        {
+          "name": "André Ricardo Backes",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "06a438d3-8838-4dc8-b06e-6d01e8d3977d",
+      "note": "#62 C: \"Flávio De Oliveira Silva\". IEEE's BibTeX export for this DOI is the only source that capitalises the tussenvoegsel; the arXiv preprint of this same paper, his ALGORITMI/UMinho page and Elsevier's metadata for him all print \"de\". Rename in place -- attribution does not move.",
+      "expect_authors": [
+        "Rodrigo Moreira",
+        "Larissa Ferreira Rodrigues Moreira",
+        "Maycon Leone Maciel Peixoto",
+        "Flávio De Oliveira Silva"
+      ],
+      "authors": [
+        {
+          "name": "Rodrigo Moreira",
+          "fabric_uuid": "e3db75e1-16f0-4ae6-956c-c5df973bae30"
+        },
+        {
+          "name": "Larissa Ferreira Rodrigues Moreira",
+          "fabric_uuid": "5ebe8ef6-c4fd-4f08-a6d0-adbef5a245a9"
+        },
+        {
+          "name": "Maycon Leone Maciel Peixoto",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Flávio de Oliveira Silva",
+          "fabric_uuid": "f3c19ffa-a28a-4e2c-b8a7-edfd056a7c85"
+        }
+      ]
+    },
+    {
+      "publication_uuid": "63f2ce16-7468-483f-9e2a-ef816f95ac07",
+      "note": "#62 C: the accented \"Joaquín Chung\" and \"Tekin Biçer\" are DBLP's disambiguation spellings, not this paper's. The accepted manuscript on NSF PAR, Crossref and both authors' own institutional pages print plain ASCII for the HPDC '22 byline. No attribution on any row here. (The stored title is also truncated to \"SciStream\" -- out of scope for #62, filed as a follow-up.)",
+      "expect_authors": [
+        "Joaquín Chung",
+        "Wojciech Zacherek",
+        "AJ Wisniewski",
+        "Zhengchun Liu",
+        "Tekin Biçer",
+        "Rajkumar Kettimuthu",
+        "Ian Foster"
+      ],
+      "authors": [
+        {
+          "name": "Joaquin Chung",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Wojciech Zacherek",
+          "fabric_uuid": null
+        },
+        {
+          "name": "AJ Wisniewski",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Zhengchun Liu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Tekin Bicer",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Rajkumar Kettimuthu",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Ian Foster",
+          "fabric_uuid": null
+        }
+      ]
+    },
+    {
+      "publication_uuid": "54051843-3a73-46f5-a264-08522c4e92ab",
+      "note": "#62 B + C: \"Moises | Ribeiro\" is two rows for one person, and \"Christina Dominicini\"/\"Everson Borges\" are the C-group variants. The SBC proceedings PDF was read directly: the byline is Edgard da Cunha Pontes, Magnos Martinello, Cristina K. Dominicini, Marcos Schwarz, Moises Ribeiro, Everson S. Borges, Italo Brito, Jeronimo Bezerra, Marinho Barcellos. Note this paper prints \"Moises Ribeiro\" plain -- #62 proposed \"Moisés R. N. Ribeiro\", but that is how he is printed on f2379ea7 and acf6a993, not here, and #62's own rule is to prefer what the paper prints. Three self-assertions shift down one slot.",
+      "expect_authors": [
+        "Edgard Pontes",
+        "Magnos Martinello",
+        "Christina Dominicini",
+        "Marcos Schwarz",
+        "Moises",
+        "Ribeiro",
+        "Everson Borges",
+        "Italo Brito",
+        "Jeronimo Bezerra",
+        "Marinho Barcellos"
+      ],
+      "authors": [
+        {
+          "name": "Edgard Pontes",
+          "fabric_uuid": "f8fa863c-8f3c-45a0-b317-71192705be06"
+        },
+        {
+          "name": "Magnos Martinello",
+          "fabric_uuid": "aea0201f-dd88-4324-8a73-57446b3b9e8a"
+        },
+        {
+          "name": "Cristina K. Dominicini",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Marcos Schwarz",
+          "fabric_uuid": "17fe0c48-110c-4e80-8d9d-b96f318bd2f7"
+        },
+        {
+          "name": "Moises Ribeiro",
+          "fabric_uuid": null
+        },
+        {
+          "name": "Everson S. Borges",
+          "fabric_uuid": "0a780c93-9180-4d7f-8682-b19e0e8ad99f"
+        },
+        {
+          "name": "Italo Brito",
+          "fabric_uuid": "d55921f6-e640-4e9c-9c10-bbc1b8b68940"
+        },
+        {
+          "name": "Jeronimo Bezerra",
+          "fabric_uuid": "22e8a3c8-4871-438b-b8cb-a82feb53c1d4"
+        },
+        {
+          "name": "Marinho Barcellos",
+          "fabric_uuid": null
+        }
+      ]
+    }
+  ],
+  "orphan_authors": [
+    {
+      "author_uuid": "bd485df2-d9c4-4199-850c-006235441f5d",
+      "publication_uuid": "1486af77-88d5-4478-ac04-bc69d7b0b304",
+      "note": "#62 D: not an unreachable attribution -- a duplicate. Author row 998b5866 on the same publication carries the same name and the same fabric_uuid (bb12773f, aacheme@clemson.edu), sits at slot 16, and matches the stored BibTeX's 17th author \"Acheme, Acheme\". Both self_asserted claims were written 0.6ms apart by migration 0003's backfill. Deleting the unlisted twin costs no attribution."
+    }
+  ]
+}

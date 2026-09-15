@@ -8,11 +8,15 @@ a rejected publication from leaving its Author rows behind. Production accumulat
 19 such orphans before this existed, so the orphan test is the one that matters most.
 """
 
+import json
+import os
+import tempfile
 from io import StringIO
 from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.http import QueryDict
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
@@ -61,6 +65,7 @@ from publicationtrkr.apps.publications.utils.claim_ledger import (
     record_admin_claim,
     record_self_claim,
     reject_suggestion,
+    relocate_claims,
 )
 from publicationtrkr.apps.publications.utils.publication_builder import (
     _sync_authors,
@@ -1711,3 +1716,307 @@ class AuthorUpdateLedgerTests(TestCase):
         self.author.refresh_from_db()
         self.assertEqual(self.author.author_name, 'Okonkwo, Jane')
         self.assertFalse(AuthorClaim.objects.filter(uuid='claim-1').exists())
+
+
+class RelocateClaimsTests(TestCase):
+    """
+    Moving a decision between two Author rows (#62) without re-deciding it.
+    """
+
+    def setUp(self):
+        self.source = Author.objects.create(
+            author_name='Bjoern Sagstad', display_name='Bjoern Sagstad',
+            author_order=1, publication_uuid='pub-1', uuid='auth-1',
+            fabric_uuid='user-1',
+        )
+        self.destination = Author.objects.create(
+            author_name='Bjoern Sagstad', display_name='Bjoern Sagstad',
+            author_order=2, publication_uuid='pub-1', uuid='auth-2',
+        )
+        self.bjoern = ApiUser.objects.create(uuid='user-1', name='Bjoern Sagstad')
+        self.claim = AuthorClaim.objects.create(
+            author=self.source, api_user=self.bjoern, uuid='claim-1',
+            status=AuthorClaim.SELF_ASSERTED, source=AuthorClaim.SELF,
+        )
+
+    def test_the_claim_moves_and_stays_self_asserted(self):
+        moved = relocate_claims(source=self.source, destination=self.destination,
+                                api_user=self.bjoern)
+        self.claim.refresh_from_db()
+        self.assertEqual(moved, 1)
+        self.assertEqual(self.claim.author, self.destination)
+        # The point of the function: an admin re-typing the attribution would have made
+        # this approved/admin and lost the fact that the subject asserted it.
+        self.assertEqual(self.claim.status, AuthorClaim.SELF_ASSERTED)
+        self.assertEqual(self.claim.source, AuthorClaim.SELF)
+        self.assertEqual(self.claim.uuid, 'claim-1')
+
+    def test_a_colliding_suggestion_on_the_destination_is_withdrawn(self):
+        # (author, api_user) is unique, and this is exactly the shape e64374e0 has in
+        # production: the scorer suggested Bjoern for the duplicate row he did not claim.
+        AuthorClaim.objects.create(
+            author=self.destination, api_user=self.bjoern, uuid='claim-2',
+            status=AuthorClaim.SUGGESTED, source=AuthorClaim.MACHINE, score=0.9,
+        )
+        relocate_claims(source=self.source, destination=self.destination,
+                        api_user=self.bjoern)
+        self.assertFalse(AuthorClaim.objects.filter(uuid='claim-2').exists())
+        self.assertEqual(AuthorClaim.objects.get(uuid='claim-1').author, self.destination)
+
+    def test_another_persons_claim_on_the_destination_is_left_alone(self):
+        someone = ApiUser.objects.create(uuid='user-2', name='Hyunsuk Bang')
+        theirs = AuthorClaim.objects.create(
+            author=self.destination, api_user=someone, uuid='claim-3',
+            status=AuthorClaim.SELF_ASSERTED, source=AuthorClaim.SELF,
+        )
+        relocate_claims(source=self.source, destination=self.destination,
+                        api_user=self.bjoern)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.author, self.destination)
+        self.assertEqual(theirs.status, AuthorClaim.SELF_ASSERTED)
+
+    def test_relocating_onto_the_same_row_is_a_no_op(self):
+        self.assertEqual(
+            relocate_claims(source=self.source, destination=self.source,
+                            api_user=self.bjoern),
+            0,
+        )
+
+
+class RepairAuthorRecordsCommandTests(TestCase):
+    """
+    The #62 repair command: it must fix author lists without costing anyone attribution.
+
+    The fixture is production's `54876276` in miniature -- a three-author paper stored as
+    four rows because `parse_bibtex` split "Grigoryan, Garegin" on the comma -- because it
+    is the case where a plain positional rename does the most damage: the surplus row is
+    dropped from the end while the second author's claim sits one slot too far down.
+    """
+
+    EXPECT = ['Grigoryan', 'Garegin', 'Kevin Penkowski', 'Minseok Kwon']
+    TARGET = ['Garegin Grigoryan', 'Kevin Penkowski', 'Minseok Kwon']
+
+    def setUp(self):
+        self.admin = ApiUser.objects.create(uuid='admin-1', name='An Admin')
+        self.garegin = ApiUser.objects.create(uuid='user-1', name='Garegin Grigoryan')
+        self.kevin = ApiUser.objects.create(uuid='user-2', name='Kevin Penkowski')
+        self.publication = create_publication(
+            data={'title': 'P4Kube', 'year': '2025', 'authors': self.EXPECT},
+            api_user=self.admin)
+        self.rows = [Author.objects.get(uuid=u) for u in self.publication.authors]
+        for row, owner in ((self.rows[0], self.garegin), (self.rows[2], self.kevin)):
+            row.fabric_uuid = owner.uuid
+            row.save(update_fields=['fabric_uuid'])
+            AuthorClaim.objects.create(
+                author=row, api_user=owner, uuid='claim-{0}'.format(owner.uuid),
+                status=AuthorClaim.SELF_ASSERTED, source=AuthorClaim.SELF,
+            )
+
+    def plan(self, **overrides):
+        entry = {
+            'publication_uuid': self.publication.uuid,
+            'note': 'four rows for three people',
+            'expect_authors': list(self.EXPECT),
+            'authors': [
+                {'name': 'Garegin Grigoryan', 'fabric_uuid': 'user-1'},
+                {'name': 'Kevin Penkowski', 'fabric_uuid': 'user-2'},
+                {'name': 'Minseok Kwon', 'fabric_uuid': None},
+            ],
+        }
+        entry.update(overrides)
+        return {'publications': [entry], 'orphan_authors': []}
+
+    def run_command(self, plan=None, apply=True, **kwargs):
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as handle:
+            json.dump(plan if plan is not None else self.plan(), handle)
+            path = handle.name
+        out = StringIO()
+        try:
+            call_command('repair_author_records', plan=path, apply=apply,
+                         as_user='admin-1', stdout=out, stderr=out, **kwargs)
+        finally:
+            os.unlink(path)
+        return out.getvalue()
+
+    def names(self):
+        rows = {a.uuid: a for a in Author.objects.filter(uuid__in=self.publication.authors)}
+        self.publication.refresh_from_db()
+        return [rows[u].author_name for u in self.publication.authors
+                if u in rows] or [a.author_name for a in
+                                  Author.objects.filter(uuid__in=self.publication.authors)]
+
+    def ordered_rows(self):
+        self.publication.refresh_from_db()
+        rows = {a.uuid: a for a in Author.objects.filter(uuid__in=self.publication.authors)}
+        return [rows[u] for u in self.publication.authors if u in rows]
+
+    def test_the_author_list_is_repaired_in_place(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+        rows = self.ordered_rows()
+        self.assertEqual([r.author_name for r in rows], self.TARGET)
+        self.assertEqual([r.author_order for r in rows], [0, 1, 2])
+
+    def test_display_name_is_repaired_too_because_that_is_what_the_page_shows(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+        self.assertEqual([r.display_name for r in self.ordered_rows()], self.TARGET)
+
+    def test_the_second_authors_claim_follows_him_to_the_slot_he_belongs_in(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+        rows = self.ordered_rows()
+        self.assertEqual(rows[0].fabric_uuid, 'user-1')
+        self.assertEqual(rows[1].fabric_uuid, 'user-2')
+        self.assertIsNone(rows[2].fabric_uuid)
+        kevins = AuthorClaim.objects.get(uuid='claim-user-2')
+        self.assertEqual(kevins.author, rows[1])
+        self.assertEqual(kevins.status, AuthorClaim.SELF_ASSERTED)
+
+    def test_no_decided_claim_is_lost(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+        self.assertEqual(
+            set(AuthorClaim.objects.values_list('uuid', flat=True)),
+            {'claim-user-1', 'claim-user-2'},
+        )
+
+    def test_a_dry_run_changes_nothing(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            output = self.run_command(apply=False)
+        self.assertIn('DRY RUN', output)
+        self.assertEqual([r.author_name for r in self.ordered_rows()], self.EXPECT)
+
+    def test_running_it_twice_is_a_no_op(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+            output = self.run_command()
+        self.assertIn('verified -- stored record already matches', output)
+        self.assertEqual([r.author_name for r in self.ordered_rows()], self.TARGET)
+
+    def test_it_refuses_a_publication_that_has_changed_since_the_survey(self):
+        # #62's own instruction: re-run the queries before acting. A list that no longer
+        # matches what was reviewed has not been reviewed.
+        row = self.ordered_rows()[1]
+        row.author_name = 'Someone Else'
+        row.save(update_fields=['author_name'])
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            with self.assertRaisesMessage(CommandError, 'have changed since'):
+                self.run_command()
+
+    def test_it_refuses_a_plan_that_would_unclaim_someone(self):
+        plan = self.plan()
+        plan['publications'][0]['authors'][1]['fabric_uuid'] = None
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            with self.assertRaisesMessage(CommandError, 'attributed to nothing'):
+                self.run_command(plan=plan)
+
+    def test_it_refuses_to_drop_a_surplus_row_that_still_carries_a_claim(self):
+        # Production's 949bbdbc: the row that falls off the end is James Griffioen's.
+        last = self.ordered_rows()[3]
+        last.fabric_uuid = 'user-3'
+        last.save(update_fields=['fabric_uuid'])
+        plan = self.plan()
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            with self.assertRaisesMessage(CommandError, 'attributed to nothing'):
+                self.run_command(plan=plan)
+
+    def test_apply_requires_an_admin(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', False):
+            with self.assertRaisesMessage(CommandError, 'not a publication tracker admin'):
+                self.run_command()
+
+    def test_publication_fields_are_written_through_the_update_path(self):
+        plan = self.plan(fields={'bibtex': '@inproceedings{k2025, title={P4Kube}}',
+                                 'link': 'https://doi.org/10.1109/ccnc54725.2025.10976037'})
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command(plan=plan)
+        self.publication.refresh_from_db()
+        self.assertIn('P4Kube', self.publication.bibtex)
+        self.assertEqual(self.publication.link,
+                         'https://doi.org/10.1109/ccnc54725.2025.10976037')
+        # The stored BibTeX must not be allowed to re-supply the broken author list it
+        # was parsed into in the first place.
+        self.assertEqual([r.author_name for r in self.ordered_rows()], self.TARGET)
+
+
+class RepairOrphanAuthorTests(TestCase):
+    """
+    #62 D: the one Author row no publication's array names. It turned out to be a
+    duplicate of a row that *is* listed, for the same person on the same publication, so
+    the command deletes it -- but only once it has checked that the twin exists and holds
+    the same claims.
+    """
+
+    def setUp(self):
+        self.admin = ApiUser.objects.create(uuid='admin-1', name='An Admin')
+        self.acheme = ApiUser.objects.create(uuid='user-1', name='Acheme Acheme')
+        self.publication = create_publication(
+            data={'title': 'A Glimpse', 'year': '2025',
+                  'authors': ['Ilya Baldin', 'Acheme Acheme']},
+            api_user=self.admin)
+        self.listed = Author.objects.get(uuid=self.publication.authors[1])
+        self.listed.fabric_uuid = 'user-1'
+        self.listed.save(update_fields=['fabric_uuid'])
+        AuthorClaim.objects.create(
+            author=self.listed, api_user=self.acheme, uuid='claim-listed',
+            status=AuthorClaim.SELF_ASSERTED, source=AuthorClaim.SELF,
+        )
+        self.orphan = Author.objects.create(
+            author_name='Acheme Acheme', display_name='Acheme Acheme',
+            publication_uuid=self.publication.uuid, uuid='orphan-1',
+            fabric_uuid='user-1',
+        )
+        AuthorClaim.objects.create(
+            author=self.orphan, api_user=self.acheme, uuid='claim-orphan',
+            status=AuthorClaim.SELF_ASSERTED, source=AuthorClaim.SELF,
+        )
+
+    def plan(self, **overrides):
+        entry = {
+            'author_uuid': 'orphan-1',
+            'publication_uuid': self.publication.uuid,
+            'note': 'duplicate of the listed row',
+        }
+        entry.update(overrides)
+        return {'publications': [], 'orphan_authors': [entry]}
+
+    def run_command(self, plan=None, apply=True):
+        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as handle:
+            json.dump(plan if plan is not None else self.plan(), handle)
+            path = handle.name
+        out = StringIO()
+        try:
+            call_command('repair_author_records', plan=path, apply=apply,
+                         as_user='admin-1', stdout=out, stderr=out)
+        finally:
+            os.unlink(path)
+        return out.getvalue()
+
+    def test_the_duplicate_is_deleted_and_the_listed_row_keeps_its_claim(self):
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            self.run_command()
+        self.assertFalse(Author.objects.filter(uuid='orphan-1').exists())
+        self.listed.refresh_from_db()
+        self.assertEqual(self.listed.fabric_uuid, 'user-1')
+        self.assertTrue(AuthorClaim.objects.filter(uuid='claim-listed').exists())
+
+    def test_it_refuses_when_there_is_no_listed_twin(self):
+        # The case #62 described and warned against deleting: a real attribution that
+        # exists nowhere else.
+        self.listed.author_name = 'Someone Else'
+        self.listed.fabric_uuid = None
+        self.listed.save(update_fields=['author_name', 'fabric_uuid'])
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            with self.assertRaisesMessage(CommandError, 'no listed twin'):
+                self.run_command()
+
+    def test_it_refuses_when_the_orphan_holds_a_claim_the_twin_does_not(self):
+        someone = ApiUser.objects.create(uuid='user-2', name='Someone Else')
+        AuthorClaim.objects.create(
+            author=self.orphan, api_user=someone, uuid='claim-extra',
+            status=AuthorClaim.APPROVED, source=AuthorClaim.ADMIN,
+        )
+        with mock.patch.object(ApiUser, 'is_publication_tracker_admin', True):
+            with self.assertRaisesMessage(CommandError, 'holds claims for'):
+                self.run_command()
