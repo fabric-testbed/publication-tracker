@@ -320,6 +320,7 @@ def author_update(request, *args, **kwargs):
             'uuid': author.uuid,
             'author_name': author.author_name,
             'display_name': author.display_name,
+            'display_name_source': author.get_display_name_source_display(),
             'fabric_uuid': author.fabric_uuid,
             'publication_uuid': author.publication_uuid,
         },

@@ -10,7 +10,9 @@ from publicationtrkr.apps.publications.utils.bibtex_utils import (
     normalize_author_name,
     parse_bibtex,
 )
+from publicationtrkr.apps.publications.utils.display_names import account_name_for, automatic_display_name
 from publicationtrkr.apps.publications.utils.publication_builder import resolve_create_fields
+from publicationtrkr.utils.names import check_account_name
 
 
 # The separators a human can use between authors. A comma is deliberately NOT one of
@@ -173,6 +175,11 @@ class AuthorForm(forms.ModelForm):
     - is_publication_tracker_admin:
         May additionally edit author_name, publication_uuid, and fabric_uuid.
         The author's uuid field is never editable.
+
+    `use_account_name` is the "use my FABRIC name" choice (#73). Checked, the author shows
+    the credited person's account name and follows later changes to it. Unchecking it
+    keeps the name shown, as a custom name. A name typed into display_name is a choice in
+    itself, whatever the box says. clean() turns that into mutate_author's tri-state.
     """
     required_css_class = 'required'
 
@@ -188,6 +195,8 @@ class AuthorForm(forms.ModelForm):
         required=True,
         label='Display Name *',
     )
+
+    use_account_name = forms.BooleanField(required=False)
 
     # Admin-only fields
     author_name = forms.CharField(
@@ -217,6 +226,43 @@ class AuthorForm(forms.ModelForm):
             del self.fields['author_name']
             del self.fields['publication_uuid']
             del self.fields['fabric_uuid']
+        self._init_use_account_name()
+
+    def _init_use_account_name(self):
+        field = self.fields['use_account_name']
+        self.account_name_note = None
+        if self.is_admin:
+            field.label = "Follow the credited person's FABRIC account name"
+            field.help_text = (
+                'Checked: shows their account name when it is usable, otherwise the byline, '
+                'and follows later changes. Unchecked: keeps the name above.')
+            account_name = account_name_for(self.instance.fabric_uuid)
+            if account_name:
+                field.label += ' ({0})'.format(account_name)
+            # Checked only when the row already shows what it would: an admin editing some
+            # other field of an author credited before #73 must not switch its name as a
+            # side effect. sync_author_display_names, reviewed, does that.
+            following = (self.instance.display_name, self.instance.display_name_source) \
+                == automatic_display_name(self.instance, account_name)
+        else:
+            # A claimant's own account name is known before they save, so an unusable one
+            # is explained rather than offered.
+            account_name, reason = check_account_name(self.api_user.name if self.api_user else None)
+            if account_name is None:
+                del self.fields['use_account_name']
+                self.account_name_note = (
+                    'Your FABRIC account name cannot be shown on papers as it is ({0}), so '
+                    'this author keeps the name above. You can change your name in the '
+                    'FABRIC portal.'.format(reason))
+                return
+            field.label = 'Show my FABRIC account name ({0})'.format(account_name)
+            field.help_text = (
+                'Checked: this paper shows your FABRIC account name and follows it when you '
+                'change it in the FABRIC portal. Unchecked: keeps the name above.')
+            # Claiming credits the author, and crediting follows the account name unless
+            # the name is custom -- so that is what the box says before saving.
+            following = self.instance.display_name_source != Author.CUSTOM
+        self.initial.setdefault('use_account_name', following)
 
     def clean(self):
         cleaned_data = super().clean()
@@ -224,6 +270,16 @@ class AuthorForm(forms.ModelForm):
         display_name = cleaned_data.get('display_name', '').strip()
         if display_name:
             cleaned_data['display_name'] = display_name
+
+        if 'use_account_name' in self.fields:
+            if 'display_name' in self.changed_data:
+                cleaned_data['use_account_name'] = None
+            elif cleaned_data.get('use_account_name'):
+                cleaned_data['use_account_name'] = True
+            elif 'use_account_name' in self.changed_data:
+                cleaned_data['use_account_name'] = False
+            else:
+                cleaned_data['use_account_name'] = None
 
         if self.is_admin:
             # author_name is required

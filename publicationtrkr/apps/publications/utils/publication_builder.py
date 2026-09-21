@@ -159,7 +159,9 @@ def _sync_authors(publication, author_names, *, explicit_slots=None, actor=None,
             renamed = row.author_name != name
             before = snapshot(row) if renamed and has_history(row) else None
             if renamed:
-                if row.display_name == row.author_name:
+                # Only a byline copy follows the byline. An account name or a chosen one
+                # belongs to the person, and a reviewed repair can rename a credited slot.
+                if row.display_name_source == Author.BYLINE and row.display_name == row.author_name:
                     row.display_name = name
                 row.author_name = name
                 withdraw_suggestions(row)

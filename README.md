@@ -480,6 +480,27 @@ The report includes each affected UUID and its attribution reference count. This
 not merge same-name accounts or reassign publications. Attribution ambiguity requires
 an explicit admin decision.
 
+#### Credited authors' display names
+
+A credited author's `display_name` follows the credited person's FABRIC account name,
+so a person corrects their name once in the FABRIC portal and every paper follows.
+`author_name`, the byline as printed, is never changed. `Author.display_name_source`
+(visible read-only in Django admin) records what a row shows: `byline`, `account`, or a
+`custom` name someone chose, which nothing automatic overwrites. Crediting an author
+applies the account name; the sync and the login refresh carry a changed one to that
+person's `account` rows, and the sync summary counts them; removing the credit restores
+the byline. An account name that cannot stand on a paper as written (all lowercase,
+ALL CAPS, a word in capitals or lowercase, a single token, several commas, a
+parenthetical note) is skipped, never title-cased; an inverted `Surname, Given` is
+un-inverted.
+
+Rows credited before this existed are brought over once, after reviewing the preview:
+
+```bash
+python manage.py sync_author_display_names           # dry run: changes by kind, skips by reason
+python manage.py sync_author_display_names --apply   # credited, non-custom rows only
+```
+
 #### Schedule
 
 The `pubtrkr-cron` sidecar runs the sync on `USER_SYNC_CRON_SCHEDULE` (daily at 03:00
@@ -872,6 +893,13 @@ author history. Before/after snapshots, including prior claim decisions, survive
 author deletion in `AuthorCorrection`, viewable read-only in Django admin. Display-name
 edits preserve existing decision provenance. Self-claiming an unclaimed author through
 the web form remains immediate; changing another account's attribution needs an admin.
+
+A credited author's `display_name` follows the account name (see *Credited authors'
+display names*). A write that changes `display_name` records it as custom unless it equals
+that account name; a write that echoes the stored value changes nothing. The optional,
+write-only `use_account_name` sets it explicitly: `true` returns the author to the
+account name (or the byline when uncredited), `false` keeps the current name as custom.
+Sending a new `display_name` together with `true` returns 400.
 
 ```bash
 # List authors (search by name)

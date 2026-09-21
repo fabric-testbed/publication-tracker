@@ -25,6 +25,10 @@
                         <div class="detail-label">Author UUID</div>
                         <div class="detail-value"><code>{{ author.uuid }}</code></div>
                     </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Display Name Source</div>
+                        <div class="detail-value">{{ author.display_name_source }}</div>
+                    </div>
                     {% if not api_user.is_publication_tracker_admin %}
                         <div class="detail-row">
                             <div class="detail-label">Author Name</div>
@@ -55,6 +59,19 @@
                         <p>
                             {{ form.display_name.label_tag }} {{ form.display_name }}
                         </p>
+                        {% if form.use_account_name %}
+                            <p>
+                                {{ form.use_account_name }} {{ form.use_account_name.label_tag }}
+                                <br>
+                                <small class="text-muted">{{ form.use_account_name.help_text }}</small>
+                            </p>
+                        {% elif form.account_name_note %}
+                            <p>
+                                <small class="text-muted">
+                                    <i class="fa fa-circle-info me-1"></i>{{ form.account_name_note }}
+                                </small>
+                            </p>
+                        {% endif %}
                         {% if api_user.is_publication_tracker_admin %}
                             <p>
                                 {{ form.author_name.label_tag }} {{ form.author_name }}

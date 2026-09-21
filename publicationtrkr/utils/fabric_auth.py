@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import requests
+from django.db import transaction
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
+from publicationtrkr.apps.publications.utils.display_names import follow_account_name_change
 from publicationtrkr.utils.names import normalize_person_name
 
 # Outbound HTTP timeout, in seconds, for every call in this module. All of them sit on
@@ -221,7 +223,7 @@ def get_api_user(request) -> ApiUser:
                 if api_user and api_user.is_authenticated:
                     api_user.access_type = ApiUser.TOKEN
                     api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
-                    api_user.save()
+                    save_refreshed_user(api_user)
                     return api_user
         if cookie:
             oidc_sub = get_oidc_sub_from_cookie(cookie=cookie)
@@ -240,12 +242,34 @@ def get_api_user(request) -> ApiUser:
                 if api_user and api_user.is_authenticated:
                     api_user.access_type = ApiUser.COOKIE
                     api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
-                    api_user.save()
+                    save_refreshed_user(api_user)
     except Exception as exc:
         print(exc)
         api_user = ApiUser.objects.filter(uuid=os.getenv('API_USER_ANON_UUID')).first()
     # return api user
     return api_user
+
+
+@transaction.atomic
+def save_refreshed_user(api_user: ApiUser) -> None:
+    """
+    Save a login refresh, and let credited authors follow a changed account name (#73).
+
+    The stored name is read under the ApiUser row lock, so the comparison sees whatever a
+    concurrent refresh or directory sync committed; the sync takes the same row before the
+    same Author rows, which keeps the two from interleaving. FOR NO KEY UPDATE rather than
+    FOR UPDATE: the plain save below takes no more than that, and a FOR UPDATE would also
+    block the KEY SHARE lock every AuthorClaim insert takes on this row -- while those
+    inserts hold the Author rows this goes on to lock. A brand-new row has no authors
+    credited to it yet, so there is nothing to carry.
+    """
+    stored = None
+    if api_user.pk:
+        stored = ApiUser.objects.select_for_update(no_key=True).filter(pk=api_user.pk) \
+            .values_list('name', flat=True).first()
+    api_user.save()
+    if stored is not None and stored != api_user.name:
+        follow_account_name_change(api_user.uuid, api_user.name)
 
 
 def get_oidc_sub_from_cookie(cookie: str) -> str | None:

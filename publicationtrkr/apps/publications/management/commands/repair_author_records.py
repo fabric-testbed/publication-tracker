@@ -309,10 +309,16 @@ class Command(BaseCommand):
         new_rows = self._rows_in_order(publication)
 
         # 5. display_name is what the page renders, and _sync_authors does not touch it.
+        #    A row still following its credited person's account name keeps it (#73); an
+        #    uncredited row -- including one whose attribution step 1 just detached --
+        #    goes back to its byline, whatever it showed before.
         for row in new_rows:
-            if row.display_name != row.author_name:
+            if row.fabric_uuid and row.display_name_source != Author.BYLINE:
+                continue
+            if row.display_name != row.author_name or row.display_name_source != Author.BYLINE:
                 row.display_name = row.author_name
-                row.save(update_fields=['display_name'])
+                row.display_name_source = Author.BYLINE
+                row.save(update_fields=['display_name', 'display_name_source'])
 
         # 6. Re-attach attribution, including onto rows created a moment ago.
         for fabric_uuid, slot in target_attr.items():
@@ -355,7 +361,8 @@ class Command(BaseCommand):
         names = [item['name'] for item in target]
         if [row.author_name for row in rows] != names:
             return False
-        if [row.display_name for row in rows] != names:
+        if any(row.display_name != name for row, name in zip(rows, names)
+               if row.display_name_source == Author.BYLINE):
             return False
         for slot, item in enumerate(target):
             if (rows[slot].fabric_uuid or None) != (item.get('fabric_uuid') or None):

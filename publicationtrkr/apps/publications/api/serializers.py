@@ -6,11 +6,15 @@ from publicationtrkr.apps.publications.utils.bibtex_utils import generate_bibtex
 
 class AuthorSerializer(serializers.ModelSerializer):
     correction_reason = serializers.CharField(required=False, allow_blank=True, max_length=2000, write_only=True)
+    # "Use my FABRIC name" (#73), write-only like correction_reason, so the public read
+    # shape keeps its six fields. `default=None` also covers form-encoded input, where
+    # DRF would otherwise read a missing boolean as False -- a pin nobody asked for.
+    use_account_name = serializers.BooleanField(required=False, allow_null=True, default=None, write_only=True)
 
     class Meta:
         model = Author
         fields = ['author_name', 'author_order', 'display_name', 'fabric_uuid', 'publication_uuid',
-                  'uuid', 'correction_reason']
+                  'uuid', 'correction_reason', 'use_account_name']
 
 
 class PublicationSerializer(serializers.ModelSerializer):

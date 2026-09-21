@@ -27,6 +27,14 @@ What it deliberately does NOT do
   leaves it blank, and the first time that person authenticates, `auth_user_by_cookie` /
   `auth_user_by_token` look the row up by `uuid`, find it, and fill cilogon_id in.
 
+What it does beyond ApiUser
+---------------------------
+* When a person's `name` changes, the Author rows credited to them whose display_name
+  follows their account (`display_name_source='account'`, #73) take the new name, in the
+  same transaction as the ApiUser row. A new name that is unusable on a paper -- all
+  lowercase, a single token, and so on -- leaves those rows as they are. The summary
+  counts both.
+
 Usage:
     python manage.py sync_fabric_users               # incremental: watermark -> now
     python manage.py sync_fabric_users --dry-run     # preview only, no writes
@@ -44,6 +52,7 @@ from django.utils.dateparse import parse_datetime
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
 from publicationtrkr.apps.apiuser.utils.locks import SYNC_ADVISORY_LOCK_KEY, advisory_lock
+from publicationtrkr.apps.publications.utils.display_names import follow_account_name_change
 from publicationtrkr.utils.core_api import (
     JOURNEY_TRACKER_MAX_WINDOW_DAYS,
     get_core_api_metrics_people,
@@ -216,6 +225,9 @@ class Command(BaseCommand):
 
         created = updated = unchanged = skipped = errors = 0
         missing_affiliation = 0
+        # Credited Author rows whose display_name followed a changed account name, and
+        # rows left alone because the new name is unusable (#73).
+        names_followed = names_kept = 0
         seen = set()
 
         for window_start, window_end in windows:
@@ -284,12 +296,20 @@ class Command(BaseCommand):
                         field for field in SYNCED_FIELDS
                         if getattr(api_user, field) != values[field]
                     ]
+                    followed = kept = 0
                     if not dry_run:
                         for field in changed:
                             setattr(api_user, field, values[field])
                         api_user.last_synced = now
                         with transaction.atomic():
                             api_user.save(update_fields=changed + ['last_synced'])
+                            if 'name' in changed:
+                                followed, kept = follow_account_name_change(fabric_uuid, values['name'])
+                    elif 'name' in changed:
+                        followed, kept = follow_account_name_change(
+                            fabric_uuid, values['name'], apply=False)
+                    names_followed += followed
+                    names_kept += kept
                     if changed:
                         updated += 1
                     else:
@@ -331,6 +351,11 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('Created      : {0}'.format(created)))
             self.stdout.write(self.style.SUCCESS('Updated      : {0}'.format(updated)))
         self.stdout.write('Unchanged    : {0}'.format(unchanged))
+        self.stdout.write(
+            'Author names : {0} credited row(s) {1} a changed account name; {2} kept '
+            '(new name unusable)'.format(
+                names_followed, 'would follow' if dry_run else 'followed', names_kept)
+        )
         self.stdout.write('Skipped      : {0}'.format(skipped))
         if missing_affiliation:
             # core-api resolved the whole 19% backlog in v1.11.5 (fabric-core-api-dev

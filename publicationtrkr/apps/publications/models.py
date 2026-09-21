@@ -76,7 +76,8 @@ class Author(models.Model):
     - author_name: name as found in the publication object when created
     - author_order: 0-based slot of this author within its publication's author list
     - publication_uuid: reference to the Publication this author belongs to
-    - display_name: editable name (defaults to author_name, modifiable by claimed user)
+    - display_name: the name shown for this author (defaults to author_name)
+    - display_name_source: why display_name holds what it does -- byline, account or custom
     - uuid: unique identifier for this author record
     - fabric_uuid: reference to the ApiUser uuid (set when claimed)
 
@@ -99,10 +100,31 @@ class Author(models.Model):
     is the ordering key, written from that same array position inside the same
     transaction (publication_builder._create_authors / _sync_authors), which is what keeps
     the two from drifting.
+
+    `display_name_source` says why `display_name` holds what it does (#73). `byline` is a
+    copy of `author_name`, the name as printed. `account` follows the credited person's
+    FABRIC account name, which they can edit in the portal: the directory sync and the
+    login refresh carry a change of that name onto every row marked this way, so a person
+    fixes their name once and every paper follows. `custom` is a name somebody typed, and
+    nothing automatic overwrites it. Only removing the credit does, because a name the
+    previous claimant chose does not belong on an uncredited byline.
+
+    `display_name` stays presentation only. BibTeX, name matching, claim scoring and
+    corrections all key on `author_name`, which none of this ever writes.
     """
+    BYLINE = 'byline'
+    ACCOUNT = 'account'
+    CUSTOM = 'custom'
+    DISPLAY_NAME_SOURCES = (
+        (BYLINE, 'Byline'),
+        (ACCOUNT, 'FABRIC account name'),
+        (CUSTOM, 'Custom'),
+    )
+
     author_name = models.CharField(max_length=255, blank=False, null=False)
     author_order = models.PositiveIntegerField(default=0)
     display_name = models.CharField(max_length=255, blank=False, null=False)
+    display_name_source = models.CharField(max_length=16, choices=DISPLAY_NAME_SOURCES, default=BYLINE)
     fabric_uuid = models.CharField(max_length=255, blank=True, null=True, default=None)
     publication_uuid = models.CharField(max_length=255, blank=False, null=False)
     uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False, unique=True)

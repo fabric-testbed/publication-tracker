@@ -26,6 +26,11 @@ withdraw them anyway -- a claimed author is no longer scored, so its suggestions
 rejections are the only record of what an admin has already ruled out, and they are what
 stops a pair being re-suggested every night.
 
+**Crediting an author brings its display name along** (#73). The three paths that write
+fabric_uuid apply the same rule under the author lock they already hold: unless the row's
+name is `custom`, it follows the credited person's account name when that name is usable
+(display_names.follow_account_name).
+
 relocate_claims() is the one function here that decides nothing. It moves an existing
 decision between two Author rows when a data repair has to renumber a publication's
 authors (#62), and it lives here so that the rule above -- a decision is never removed --
@@ -39,6 +44,9 @@ from django.db import transaction
 
 from publicationtrkr.apps.apiuser.models import ApiUser
 from publicationtrkr.apps.publications.models import Author, AuthorClaim
+from publicationtrkr.apps.publications.utils.display_names import (
+    account_name_for, follow_account_name, recheck_after_commit,
+)
 
 
 class ClaimDecisionError(Exception):
@@ -133,7 +141,10 @@ def approve_suggestion(claim, *, decided_by) -> int:
         )
 
     author.fabric_uuid = claim.api_user.uuid
-    author.save(update_fields=['fabric_uuid'])
+    follow_account_name(author, account_name_for(author.fabric_uuid))
+    author.save(update_fields=['fabric_uuid', 'display_name', 'display_name_source'])
+    if author.display_name_source == Author.ACCOUNT:
+        recheck_after_commit(author.pk)
 
     claim.status = AuthorClaim.APPROVED
     claim.decided_at = datetime.now(timezone.utc)
@@ -172,7 +183,8 @@ def record_self_claim(author, api_user) -> AuthorClaim:
     if author.fabric_uuid and author.fabric_uuid != api_user.uuid:
         raise ClaimDecisionError('This author is already claimed by another user.')
     author.fabric_uuid = api_user.uuid
-    author.save(update_fields=['fabric_uuid'])
+    follow_account_name(author, account_name_for(author.fabric_uuid))
+    author.save(update_fields=['fabric_uuid', 'display_name', 'display_name_source'])
     claim = _record(
         author, api_user,
         status=AuthorClaim.SELF_ASSERTED,
@@ -205,6 +217,8 @@ def record_admin_claim(author, fabric_uuid, *, decided_by) -> AuthorClaim | None
     api_user = ApiUser.objects.filter(uuid=fabric_uuid).first()
     if api_user is None:
         return None
+    if follow_account_name(author, account_name_for(api_user.uuid)):
+        author.save(update_fields=['display_name', 'display_name_source'])
     claim = _record(
         author, api_user,
         status=AuthorClaim.APPROVED,

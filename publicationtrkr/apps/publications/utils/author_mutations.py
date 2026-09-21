@@ -3,6 +3,9 @@
 Lock publications in primary-key order, then authors, then claims. Scoring only
 locks an author and its claims; it never acquires a publication lock afterwards.
 Correction snapshots have no cascading FK: deleting an author cannot erase them.
+
+display_name is presentation, not identity (#73): changing it never needs a correction.
+Which name a row shows, and why, is settled by _apply_display_name.
 """
 
 from django.db import transaction
@@ -16,9 +19,15 @@ from publicationtrkr.apps.publications.models import Author, AuthorClaim, Author
 from publicationtrkr.apps.publications.utils.claim_ledger import (
     record_admin_claim, record_self_claim, withdraw_suggestions,
 )
+from publicationtrkr.apps.publications.utils.display_names import (
+    account_name_for, choose_display_name, recheck_after_commit, restore_byline, use_automatic,
+)
 
 
 AUTHOR_FIELDS = ('uuid', 'author_name', 'display_name', 'fabric_uuid', 'publication_uuid', 'author_order')
+# Snapshotted so a correction records whether a name was chosen, but never taken from
+# request data: the source follows from what was submitted (_apply_display_name).
+SNAPSHOT_FIELDS = AUTHOR_FIELDS + ('display_name_source',)
 
 
 def snapshot(author):
@@ -27,7 +36,7 @@ def snapshot(author):
         'decided_at', 'decided_by__uuid', 'api_user__uuid',
     ))
     return json.loads(json.dumps({
-        'author': {field: getattr(author, field) for field in AUTHOR_FIELDS},
+        'author': {field: getattr(author, field) for field in SNAPSHOT_FIELDS},
         'claims': claims,
     }, cls=DjangoJSONEncoder))
 
@@ -61,6 +70,51 @@ def _publications(uuids):
     return {p.uuid: p for p in pubs}
 
 
+def _apply_display_name(author, before, submitted, use_account_name):
+    """
+    Settle display_name and display_name_source once the other fields are applied (#73).
+
+    `use_account_name` is tri-state. True returns the row to automatic naming -- the
+    credited person's usable account name, else the byline. False pins the name as
+    `custom`, even one equal to the account name: that is the form's unchecked box
+    saying "keep this name", and it has to stick. None, which is every API call that does
+    not send it, counts `submitted` as a choice only when it differs from what is stored,
+    so a PUT that echoes a GET back pins nothing; a changed name that equals the account
+    name keeps following it. On create, a display_name equal to the byline is the default
+    rather than a choice.
+
+    With no choice made, the name still has to stay true to what changed around it.
+    Removing the credit restores the byline, even over a custom name: that name was the
+    previous claimant's. Moving the credit to someone else drops a followed account name
+    before the ledger applies the new person's (claim_ledger). Renaming the byline carries
+    a byline copy along with it.
+    """
+    was = before['author'] if before else None
+    account_name = account_name_for(author.fabric_uuid)
+    stored = was['display_name'] if was else author.author_name
+    changed = submitted is not None and submitted != stored
+    if use_account_name:
+        if changed and was is not None:
+            raise ValidationError({'use_account_name': 'Send a new display_name or use_account_name, not both.'})
+        use_automatic(author, account_name)
+    elif use_account_name is False:
+        author.display_name = submitted or author.display_name or author.author_name
+        author.display_name_source = Author.CUSTOM
+    elif changed:
+        choose_display_name(author, submitted, account_name)
+    elif was is None:
+        use_automatic(author, account_name)
+    else:
+        old_credit, new_credit = was['fabric_uuid'] or None, author.fabric_uuid or None
+        if old_credit and not new_credit:
+            restore_byline(author)
+        elif old_credit and new_credit != old_credit and author.display_name_source == Author.ACCOUNT:
+            restore_byline(author)
+        elif author.display_name_source == Author.BYLINE and author.author_name != was['author_name'] \
+                and author.display_name == was['author_name']:
+            author.display_name = author.author_name
+
+
 def _save_membership(pub, uuids, actor):
     pub.authors = uuids
     pub.modified_by = actor
@@ -75,6 +129,7 @@ def mutate_author(*, actor, data, author=None, delete=False, self_claim=False):
     """Apply validated fields, maintaining membership, order, attribution and history."""
     data = dict(data)
     reason = data.pop('correction_reason', '')
+    use_account_name = data.pop('use_account_name', None)
     if not self_claim and not actor.is_publication_tracker_admin:
         raise ValidationError({'detail': 'Only admins may edit author records.'})
     old_pub_uuid = None
@@ -93,7 +148,8 @@ def mutate_author(*, actor, data, author=None, delete=False, self_claim=False):
         if self_claim:
             if author.fabric_uuid and author.fabric_uuid != actor.uuid:
                 raise ValidationError({'fabric_uuid': 'This author is already claimed by another user.'})
-            data = {'display_name': data.get('display_name', author.display_name), 'fabric_uuid': actor.uuid}
+            chosen = {'display_name': data['display_name']} if 'display_name' in data else {}
+            data = {**chosen, 'fabric_uuid': actor.uuid}
         if 'uuid' in data and data['uuid'] != author.uuid:
             raise ValidationError({'uuid': 'The author UUID cannot be changed.'})
         changes_identity = any(
@@ -124,12 +180,11 @@ def mutate_author(*, actor, data, author=None, delete=False, self_claim=False):
     fabric_uuid = data.get('fabric_uuid', author.fabric_uuid)
     if fabric_uuid and not ApiUser.objects.filter(uuid=fabric_uuid).exists():
         raise ValidationError({'fabric_uuid': 'Must identify an existing FABRIC user.'})
+    submitted_display_name = data.pop('display_name', None)
     for field in AUTHOR_FIELDS:
         if field in data:
             setattr(author, field, data[field])
-    if before and author.author_name != before['author']['author_name']:
-        if 'display_name' not in data and author.display_name == before['author']['author_name']:
-            author.display_name = author.author_name
+    _apply_display_name(author, before, submitted_display_name, use_account_name)
     if before and any(getattr(author, field) != before['author'][field]
                       for field in ('author_name', 'publication_uuid')):
         # Project and coauthor evidence belongs to the original publication.
@@ -159,6 +214,8 @@ def mutate_author(*, actor, data, author=None, delete=False, self_claim=False):
     membership.insert(position, author.uuid)
     _save_membership(pub, membership, actor)
     author.refresh_from_db()
+    if author.display_name_source == Author.ACCOUNT:
+        recheck_after_commit(author.pk)
     if requires_correction:
         record_correction(author, actor, reason, before)
     elif before and (before['author']['fabric_uuid'] or '') != (author.fabric_uuid or '') and any(
