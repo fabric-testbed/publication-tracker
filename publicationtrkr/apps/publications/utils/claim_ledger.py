@@ -9,10 +9,10 @@ ledger is only worth keeping if every row means the same thing:
   * the admin author form records an `approved` row for a hand-entered fabric_uuid
     (views.author_update).
 
-`Author.fabric_uuid` stays the single authoritative field. It is written here only by
-approve_suggestion(), and only after the guard below; the record_* functions are called
-*after* the caller has already written it through its own existing path, and they only
-add the ledger row that path never had. Scoring never writes it at all.
+`Author.fabric_uuid` stays the single authoritative field. Approval and self-claim
+lock and check the current author before writing it. The shared author mutation
+service supplies the outer transaction for API/form edits and audit snapshots.
+Scoring never writes attribution.
 
 Two rules the whole module exists to keep consistent:
 
@@ -38,7 +38,7 @@ from uuid import uuid4
 from django.db import transaction
 
 from publicationtrkr.apps.apiuser.models import ApiUser
-from publicationtrkr.apps.publications.models import AuthorClaim
+from publicationtrkr.apps.publications.models import Author, AuthorClaim
 
 
 class ClaimDecisionError(Exception):
@@ -62,6 +62,12 @@ def _record(author, api_user, *, status, source, decided_by, signals=None) -> Au
     unique constraint is on, so a self-claim of a pair the scorer had already suggested
     promotes that row rather than colliding with it.
     """
+    existing = AuthorClaim.objects.select_for_update().filter(author=author, api_user=api_user).first()
+    if existing is not None and existing.status in (AuthorClaim.APPROVED, AuthorClaim.SELF_ASSERTED):
+        # Editing a display name or reasserting an existing attribution must not
+        # rewrite who originally decided it. Explicit corrections have a separate
+        # immutable snapshot, including when an old attribution is restored.
+        return existing
     claim, _ = AuthorClaim.objects.update_or_create(
         author=author,
         api_user=api_user,
@@ -86,6 +92,20 @@ def _record(author, api_user, *, status, source, decided_by, signals=None) -> Au
     return claim
 
 
+def _lock_current_suggestion(claim):
+    author = Author.objects.select_for_update().filter(pk=claim.author_id).first()
+    if author is None:
+        raise ClaimDecisionError('This author was removed. Reload the queue.')
+    current = AuthorClaim.objects.select_for_update().filter(pk=claim.pk).first()
+    if current is None:
+        raise ClaimDecisionError('This suggestion was withdrawn. Reload the queue.')
+    if current.author_id != author.pk:
+        # A repair can relocate claims while a queue request holds a stale object.
+        # Never decide the moved claim using the original author's lock/identity.
+        raise ClaimDecisionError('This claim moved to another author. Reload the queue.')
+    return author, current
+
+
 @transaction.atomic
 def approve_suggestion(claim, *, decided_by) -> int:
     """
@@ -94,11 +114,11 @@ def approve_suggestion(claim, *, decided_by) -> int:
     Returns the number of sibling suggestions withdrawn. Raises ClaimDecisionError when
     the approval must not be applied.
     """
+    author, claim = _lock_current_suggestion(claim)
     if claim.is_decided:
         raise ClaimDecisionError(
             'This claim was already {0} and cannot be decided again.'.format(claim.status)
         )
-    author = claim.author
     # Refuse rather than overwrite. Between the scoring run and this click the author may
     # have been claimed -- by its owner through the self-claim path, or by another admin
     # in another tab -- and a scored suggestion is not grounds for taking an existing
@@ -129,6 +149,7 @@ def reject_suggestion(claim, *, decided_by) -> None:
     Reject a suggestion. Attribution is untouched, and the row is kept rather than
     deleted -- that is the whole point of a rejection.
     """
+    _, claim = _lock_current_suggestion(claim)
     if claim.is_decided:
         raise ClaimDecisionError(
             'This claim was already {0} and cannot be decided again.'.format(claim.status)
@@ -144,11 +165,14 @@ def record_self_claim(author, api_user) -> AuthorClaim:
     """
     Record the immediate self-claim path as `self_asserted` (option (a) on the issue).
 
-    The claim itself has already been written by the caller; this is the ledger entry it
-    never had. Migration 0003 backfilled the same row for every claim made before the
-    ledger existed, so without this the ledger would start complete and immediately begin
-    drifting again.
+    Lock and recheck attribution, then write it together with its ledger entry.
+    Migration 0003 backfilled the same row for claims made before the ledger existed.
     """
+    author = Author.objects.select_for_update().get(pk=author.pk)
+    if author.fabric_uuid and author.fabric_uuid != api_user.uuid:
+        raise ClaimDecisionError('This author is already claimed by another user.')
+    author.fabric_uuid = api_user.uuid
+    author.save(update_fields=['fabric_uuid'])
     claim = _record(
         author, api_user,
         status=AuthorClaim.SELF_ASSERTED,
@@ -175,6 +199,7 @@ def record_admin_claim(author, fabric_uuid, *, decided_by) -> AuthorClaim | None
     Clearing an attribution deliberately leaves the previous decision in place. A claim
     that was made and later undone is history, and history is what this table is.
     """
+    author = Author.objects.select_for_update().get(pk=author.pk)
     if not fabric_uuid:
         return None
     api_user = ApiUser.objects.filter(uuid=fabric_uuid).first()

@@ -3,7 +3,6 @@ import re
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator
-from django.forms import CheckboxSelectMultiple
 
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.apiuser.models import ApiUser
@@ -177,6 +176,13 @@ class AuthorForm(forms.ModelForm):
     """
     required_css_class = 'required'
 
+    correction_reason = forms.CharField(
+        required=False, max_length=2000,
+        widget=forms.Textarea(attrs={'rows': 2, 'cols': 60}),
+        label='Reason for attribution correction',
+        help_text='Required when changing or removing an existing attribution. Prior claims are retained in the correction history.',
+    )
+
     display_name = forms.CharField(
         widget=forms.TextInput(attrs={'size': 60}),
         required=True,
@@ -207,6 +213,7 @@ class AuthorForm(forms.ModelForm):
         self.is_admin = bool(self.api_user and self.api_user.is_publication_tracker_admin)
         super().__init__(*args, **kwargs)
         if not self.is_admin:
+            del self.fields['correction_reason']
             del self.fields['author_name']
             del self.fields['publication_uuid']
             del self.fields['fabric_uuid']

@@ -14,14 +14,19 @@ failure returned 400 with those rows already committed and no publication left t
 reference them. Production accumulated 19 of them that way.
 """
 
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from django.db import transaction
+from rest_framework.exceptions import ValidationError
 
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.publications.utils.bibtex_utils import parse_bibtex
 from publicationtrkr.apps.publications.utils.claim_ledger import withdraw_suggestions
+from publicationtrkr.apps.publications.utils.author_mutations import (
+    has_history, correction_reason, snapshot, record_correction,
+)
 
 
 def _first_present(*values):
@@ -113,54 +118,64 @@ def _create_authors(publication_uuid: str, author_names) -> list:
     ]
 
 
-def _sync_authors(publication, author_names) -> list:
-    """
-    Reconcile a publication's Author rows against a new list of names.
+@transaction.atomic
+def _sync_authors(publication, author_names, *, explicit_slots=None, actor=None, reason=None) -> list:
+    """Keep exact-name identities across reorder/insertion; never guess claimed renames.
 
-    Rows are matched by position in Publication.authors, which keeps uuid,
-    display_name and fabric_uuid stable when a different author in the same list is
-    renamed -- losing fabric_uuid here would silently unclaim someone's publication.
-    Surplus rows are deleted rather than orphaned.
-
-    That same position is now also written to author_order, so a payload that reorders an
-    existing author list persists the new order instead of only appearing to change it.
-    A reorder is not a rename: author_order is updated on its own, and the claim
-    suggestions are left alone, because the row still refers to the same person.
+    Only the reviewed repair command supplies explicit_slots. Public string-list
+    updates cannot express replacement of a claimed person; use an admin correction.
     """
-    existing_uuids = list(publication.authors)
-    new_author_uuids = []
-    for i, author_name in enumerate(author_names):
-        if i < len(existing_uuids):
-            # Update the existing Author in place
-            try:
-                author = Author.objects.get(uuid=existing_uuids[i])
-                renamed = author.author_name != author_name
-                changed_fields = []
-                if renamed:
-                    author.author_name = author_name
-                    changed_fields.append('author_name')
-                if author.author_order != i:
-                    author.author_order = i
-                    changed_fields.append('author_order')
-                if changed_fields:
-                    author.save(update_fields=changed_fields)
-                if renamed:
-                    # The claim suggestions for this row were scored against the old
-                    # spelling and are no longer about this author, so they are withdrawn
-                    # rather than left in the queue for up to a day until the next scoring
-                    # run recomputes them. Decisions are untouched -- withdraw_suggestions
-                    # only ever removes `suggested` rows.
-                    withdraw_suggestions(author)
-                new_author_uuids.append(author.uuid)
-                continue
-            except Author.DoesNotExist:
-                pass
-        # New author, or the matched record has gone missing -- create fresh
-        new_author_uuids.append(_new_author(publication.uuid, author_name, i).uuid)
-    # Remove any leftover Authors beyond the new list length
-    for old_uuid in existing_uuids[len(author_names):]:
-        Author.objects.filter(uuid=old_uuid).delete()
-    return new_author_uuids
+    by_uuid = {a.uuid: a for a in Author.objects.select_for_update().filter(
+        uuid__in=publication.authors).order_by('pk')}
+    existing = [by_uuid[u] for u in publication.authors if u in by_uuid]
+    if explicit_slots is not None:
+        correction_reason(actor, reason)
+        if len(explicit_slots) != len(author_names):
+            raise ValidationError({'authors': 'Explicit author mapping has the wrong length.'})
+        used = [u for u in explicit_slots if u is not None]
+        if len(set(used)) != len(used) or any(u not in by_uuid for u in used):
+            raise ValidationError({'authors': 'Explicit author mapping is invalid.'})
+        matched = [by_uuid.get(u) for u in explicit_slots]
+    else:
+        names = defaultdict(deque)
+        for row in existing:
+            names[row.author_name].append(row)
+        matched = [names[name].popleft() if names[name] else None for name in author_names]
+        used = {row.uuid for row in matched if row is not None}
+        remaining = [row for row in existing if row.uuid not in used]
+        if any(has_history(row) for row in remaining):
+            raise ValidationError({'authors': 'This edit removes or replaces an author with attribution or claim history. Use an explicit admin author correction first.'})
+        # Reuse unclaimed unmatched rows for spelling edits, without shifting the
+        # exact-name matches (including every claimed identity) around them.
+        unmatched = iter(remaining)
+        matched = [row if row is not None else next(unmatched, None) for row in matched]
+
+    kept = set()
+    result = []
+    for position, (name, row) in enumerate(zip(author_names, matched)):
+        if row is None:
+            row = _new_author(publication.uuid, name, position)
+        else:
+            renamed = row.author_name != name
+            before = snapshot(row) if renamed and has_history(row) else None
+            if renamed:
+                if row.display_name == row.author_name:
+                    row.display_name = name
+                row.author_name = name
+                withdraw_suggestions(row)
+            row.author_order = position
+            row.save(update_fields=['author_name', 'display_name', 'author_order'])
+            if before:
+                record_correction(row, actor, correction_reason(actor, reason), before)
+        kept.add(row.uuid)
+        result.append(row.uuid)
+    for row in existing:
+        if row.uuid not in kept:
+            if has_history(row):
+                # A repair must relocate all decided claims before deleting a slot.
+                raise ValidationError({'authors': 'Cannot delete an author carrying attribution or claim history.'})
+            row.delete()
+    return result
 
 
 def create_publication(*, data, api_user, resolve_project_name=None) -> Publication:
@@ -208,7 +223,8 @@ def create_publication(*, data, api_user, resolve_project_name=None) -> Publicat
     return publication
 
 
-def update_publication(*, publication, data, api_user, resolve_project_name=None) -> Publication:
+def update_publication(*, publication, data, api_user, resolve_project_name=None,
+                       author_slots=None, author_correction_reason=None) -> Publication:
     """
     Apply an update payload to an existing publication and its Author rows in one
     transaction. Fields the payload does not carry keep their stored values; see
@@ -219,14 +235,23 @@ def update_publication(*, publication, data, api_user, resolve_project_name=None
     project_name = fields.get('project_name', publication.project_name)
     project_uuid = fields.get('project_uuid', publication.project_uuid)
     # Outside the transaction, for the reason given in create_publication().
-    if project_uuid and not project_name and resolve_project_name:
+    if project_uuid and resolve_project_name and (not project_name or (
+            project_uuid != publication.project_uuid and 'project_name' not in fields)):
         project_name = resolve_project_name(project_uuid)
+        if not project_name:
+            raise ValidationError({'project_uuid': 'Unable to find project.'})
 
     with transaction.atomic():
+        publication = Publication.objects.select_for_update().get(pk=publication.pk)
+        # Omitted project fields must use the locked current row, not a stale form.
+        if 'project_uuid' not in fields and 'project_name' not in fields:
+            project_name, project_uuid = publication.project_name, publication.project_uuid
         if 'bibtex' in fields:
             publication.bibtex = fields['bibtex']
         if 'authors' in fields:
-            publication.authors = _sync_authors(publication, fields['authors'])
+            publication.authors = _sync_authors(
+                publication, fields['authors'], explicit_slots=author_slots,
+                actor=api_user, reason=author_correction_reason)
         if 'link' in fields:
             publication.link = fields['link']
         publication.modified = datetime.now(timezone.utc)

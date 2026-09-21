@@ -56,6 +56,30 @@ from publicationtrkr.apps.publications.utils.claim_scoring import (
 MAX_SUGGESTIONS_PER_AUTHOR = 5
 
 
+@transaction.atomic
+def persist_suggestion(author, api_user, score, signals):
+    """Recheck the author and decision under the same locks used by human writers."""
+    locked = Author.objects.select_for_update().filter(pk=author.pk).first()
+    if locked is None or any(getattr(locked, f) != getattr(author, f) for f in (
+            'author_name', 'publication_uuid', 'fabric_uuid')):
+        return 'changed', None
+    current = AuthorClaim.objects.select_for_update().filter(author=locked, api_user=api_user).first()
+    if current is not None and current.is_decided:
+        return 'decided', None
+    if current is None:
+        AuthorClaim.objects.create(
+            author=locked, api_user=api_user, score=score, signals=signals,
+            source=AuthorClaim.MACHINE, status=AuthorClaim.SUGGESTED, uuid=str(uuid4()),
+        )
+        return 'created', None
+    if current.score == score and current.signals == signals:
+        return 'unchanged', None
+    previous = current.score
+    AuthorClaim.objects.filter(pk=current.pk, status=AuthorClaim.SUGGESTED).update(
+        score=score, signals=signals, modified=datetime.now(timezone.utc))
+    return 'updated', previous
+
+
 class Command(BaseCommand):
     help = 'Score candidate FABRIC users for unclaimed publication authors (#32).'
 
@@ -211,23 +235,24 @@ class Command(BaseCommand):
                 seen_pairs.add(key)
                 new_scores.append(score)
                 current = existing.get(key)
-                if current is None:
-                    created += 1
-                    if not dry_run:
-                        AuthorClaim.objects.create(
-                            author=author, api_user=api_user, score=score,
-                            signals=signals, source=AuthorClaim.MACHINE,
-                            status=AuthorClaim.SUGGESTED, uuid=str(uuid4()),
-                        )
-                elif current.score != score or current.signals != signals:
-                    updated += 1
-                    deltas.append(score - current.score)
-                    if not dry_run:
-                        current.score = score
-                        current.signals = signals
-                        current.save(update_fields=['score', 'signals', 'modified'])
+                if dry_run:
+                    if current is None:
+                        state, previous = 'created', None
+                    elif current.score != score or current.signals != signals:
+                        state, previous = 'updated', current.score
+                    else:
+                        state, previous = 'unchanged', None
                 else:
+                    state, previous = persist_suggestion(author, api_user, score, signals)
+                if state == 'created':
+                    created += 1
+                elif state == 'updated':
+                    updated += 1
+                    deltas.append(score - previous)
+                elif state == 'unchanged':
                     unchanged += 1
+                elif state == 'decided':
+                    skipped_decided += 1
 
         # A standing suggestion that no longer scores is withdrawn -- an author renamed
         # through the API should not keep the suggestions computed from the old spelling.
@@ -235,7 +260,8 @@ class Command(BaseCommand):
         stale = [c for key, c in existing.items() if key not in seen_pairs]
         if stale and not dry_run:
             with transaction.atomic():
-                AuthorClaim.objects.filter(id__in=[c.id for c in stale]).delete()
+                AuthorClaim.objects.filter(
+                    id__in=[c.id for c in stale], status=AuthorClaim.SUGGESTED).delete()
 
         self.stdout.write(
             '\n--- Summary ---\n'

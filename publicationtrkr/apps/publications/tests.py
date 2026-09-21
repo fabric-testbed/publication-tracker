@@ -22,7 +22,7 @@ from django.http import QueryDict
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
 from publicationtrkr.apps.publications.api.serializers import PublicationSerializer
@@ -1489,9 +1489,12 @@ class ClaimLedgerTests(TestCase):
         publication = Publication.objects.create(
             authors=[self.author.uuid], title='A paper', uuid='pub-1', year='2026',
         )
-        _sync_authors(publication, ['Okonkwo, Jane'])
+        with self.assertRaises(ValidationError):
+            _sync_authors(publication, ['Okonkwo, Jane'])
         self.claim.refresh_from_db()
         self.assertEqual(self.claim.status, AuthorClaim.REJECTED)
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.author_name, 'Smith, Jane')
 
 
 class AuthorClaimQueuePageTests(TestCase):

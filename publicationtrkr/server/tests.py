@@ -37,6 +37,40 @@ def _ok(request):
     return HttpResponse('reached the view')
 
 
+class LogoutCookieTests(SimpleTestCase):
+    def test_logout_expires_cookie_on_its_configured_domain(self):
+        from publicationtrkr.server.views import logout_view
+
+        with mock.patch.dict(os.environ, {
+            'VOUCH_COOKIE_NAME': 'vouch',
+            'VOUCH_COOKIE_DOMAIN': '.example.org',
+        }):
+            response = logout_view(RequestFactory().get('/logout'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/')
+        cookie = response.cookies['vouch']
+        self.assertEqual(cookie['domain'], '.example.org')
+        self.assertEqual(cookie['path'], '/')
+        self.assertEqual(cookie['max-age'], 0)
+
+    def test_host_only_cookie_remains_host_only(self):
+        from publicationtrkr.server.views import logout_view
+
+        with mock.patch.dict(os.environ, {
+            'VOUCH_COOKIE_NAME': 'vouch', 'VOUCH_COOKIE_DOMAIN': '',
+        }):
+            response = logout_view(RequestFactory().get('/logout'))
+        self.assertEqual(response.cookies['vouch']['domain'], '')
+        self.assertEqual(response.cookies['vouch']['max-age'], 0)
+
+    def test_unconfigured_cookie_name_does_not_emit_a_cookie(self):
+        from publicationtrkr.server.views import logout_view
+
+        with mock.patch.dict(os.environ, {'VOUCH_COOKIE_NAME': ''}):
+            response = logout_view(RequestFactory().get('/logout'))
+        self.assertFalse(response.cookies)
+
+
 class ApiSimpleRequestGuardTests(SimpleTestCase):
     """
     The guard exists because DRF wraps every view in csrf_exempt while identity comes

@@ -1,11 +1,9 @@
 from django.db import models
-import os
-from datetime import datetime, timedelta, timezone
 from django.db.models import Q
-from django.db.models import Deferrable, UniqueConstraint
+from django.db.models import UniqueConstraint
 from django.contrib.postgres.fields import ArrayField
-from django.db import models
 from publicationtrkr.apps.apiuser.models import ApiUser
+from uuid import uuid4
 
 # Create your models here.
 class Publication(models.Model):
@@ -107,7 +105,7 @@ class Author(models.Model):
     display_name = models.CharField(max_length=255, blank=False, null=False)
     fabric_uuid = models.CharField(max_length=255, blank=True, null=True, default=None)
     publication_uuid = models.CharField(max_length=255, blank=False, null=False)
-    uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False)
+    uuid = models.CharField(primary_key=False, max_length=255, blank=False, null=False, unique=True)
 
     class Meta:
         # The ordering every consumer inherits, so a caller that forgets to order is
@@ -239,3 +237,19 @@ class AuthorClaim(models.Model):
 
     def __str__(self):
         return self.uuid
+
+
+class AuthorCorrection(models.Model):
+    """Immutable evidence retained independently of corrected/deleted author rows."""
+
+    uuid = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    created = models.DateTimeField(auto_now_add=True)
+    actor_uuid = models.CharField(max_length=255)
+    author_uuid = models.CharField(max_length=255, db_index=True)
+    publication_uuid = models.CharField(max_length=255)
+    reason = models.TextField()
+    before = models.JSONField()
+    after = models.JSONField(null=True)
+
+    class Meta:
+        ordering = ('created', 'uuid')

@@ -18,5 +18,6 @@ def logout_view(request):
     response = redirect('home')
     vouch_cookie_name = os.getenv('VOUCH_COOKIE_NAME', '')
     if vouch_cookie_name:
-        response.delete_cookie(vouch_cookie_name)
+        response.delete_cookie(
+            vouch_cookie_name, domain=os.getenv('VOUCH_COOKIE_DOMAIN') or None)
     return response

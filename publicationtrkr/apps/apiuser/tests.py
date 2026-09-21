@@ -18,10 +18,13 @@ from io import StringIO
 from unittest import mock
 
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase
+from django.core.management.base import CommandError
+from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
-from publicationtrkr.utils.fabric_auth import split_fabric_roles
+from publicationtrkr.utils.fabric_auth import (
+    auth_user_by_cookie, auth_user_by_token, get_api_user, split_fabric_roles,
+)
 
 PROJECT_A = 'f0e4a6c1-1111-4a2b-9c3d-000000000001'
 PROJECT_B = 'f0e4a6c1-2222-4a2b-9c3d-000000000002'
@@ -213,12 +216,137 @@ class SyncFabricUsersTests(TestCase):
         self.run_sync([person('u-6')], '--since', '2026-08-01')
         self.assertIsNotNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
 
+    def test_failed_row_preserves_tracker_and_retry_replays_successful_rows(self):
+        tracker = TaskTimeoutTracker.objects.get(name='user_sync_check')
+        tracker.value = '2026-08-01T00:00:00+00:00'
+        tracker.last_updated = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        tracker.save()
+        previous_updated = tracker.last_updated
+        # PostgreSQL rejects this oversized name, exercising the savepoint rather
+        # than only a mocked Python exception. The following row must still save.
+        with self.assertRaisesMessage(CommandError, 'directory row(s) failed'):
+            self.run_sync([person('failed', name='X' * 256), person('succeeded')], '--if-due')
+        tracker.refresh_from_db()
+        self.assertEqual(tracker.value, '2026-08-01T00:00:00+00:00')
+        self.assertEqual(tracker.last_updated, previous_updated)
+        succeeded_pk = ApiUser.objects.get(uuid='succeeded').pk
+        self.assertFalse(ApiUser.objects.filter(uuid='failed').exists())
+
+        self.run_sync([person('failed'), person('succeeded')], '--if-due')
+        self.assertEqual(ApiUser.objects.get(uuid='succeeded').pk, succeeded_pk)
+        self.assertEqual(ApiUser.objects.filter(uuid__in=['failed', 'succeeded']).count(), 2)
+        tracker.refresh_from_db()
+        self.assertGreater(tracker.last_updated, previous_updated)
+        self.assertNotEqual(tracker.value, '2026-08-01T00:00:00+00:00')
+
+    def test_malformed_row_reports_failure_without_advancing_tracker(self):
+        with self.assertRaisesMessage(CommandError, 'directory row(s) failed'):
+            self.run_sync([None, person('valid')], '--since', '2026-08-01')
+        self.assertTrue(ApiUser.objects.filter(uuid='valid').exists())
+        self.assertIsNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
+
+    def test_names_are_normalized_without_combining_distinct_accounts(self):
+        ApiUser.objects.create(uuid='existing', name='Old name')
+        self.run_sync([
+            person('existing', name='  Bruno\u00a0 Silva\t'),
+            person('other', name='Bruno  Silva'),
+        ], '--since', '2026-08-01')
+        self.assertEqual(ApiUser.objects.get(uuid='existing').name, 'Bruno Silva')
+        self.assertEqual(ApiUser.objects.get(uuid='other').name, 'Bruno Silva')
+
     def test_the_anonymous_user_is_never_touched(self):
         anon_uuid = '00000000-0000-0000-0000-000000000000'
         ApiUser.objects.create(uuid=anon_uuid, name='Anonymous API User')
         self.run_sync([person(anon_uuid, name='Should Not Apply')],
                       '--since', '2026-08-01')
         self.assertEqual(ApiUser.objects.get(uuid=anon_uuid).name, 'Anonymous API User')
+
+
+class RequestAuthenticationModeTests(TestCase):
+    """A shared directory cache cannot determine the current request's credential."""
+
+    def setUp(self):
+        self.env = mock.patch.dict(os.environ, {
+            'API_USER_ANON_UUID': 'anonymous',
+            'VOUCH_COOKIE_NAME': 'vouch',
+            'API_USER_REFRESH_CHECK_MINUTES': '5',
+            'FABRIC_CORE_API': 'https://core.example.test',
+        })
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.anonymous = ApiUser.objects.create(uuid='anonymous', name='Anonymous')
+        self.user = ApiUser.objects.create(
+            uuid='person', cilogon_id='subject', name='Some One',
+            access_type=ApiUser.COOKIE,
+            access_expires=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+        for function, result in (
+            ('is_token_revoked', False),
+            ('get_oidc_sub_from_token', 'subject'),
+            ('get_oidc_sub_from_cookie', 'subject'),
+        ):
+            patcher = mock.patch('publicationtrkr.utils.fabric_auth.' + function, return_value=result)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_cached_token_request_uses_token_mode_without_updating_shared_row(self):
+        request = RequestFactory().get('/', HTTP_AUTHORIZATION='Bearer test')
+        resolved = get_api_user(request)
+        self.assertEqual(resolved.access_type, ApiUser.TOKEN)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.access_type, ApiUser.COOKIE)
+
+    def test_cached_cookie_request_uses_cookie_mode_without_updating_shared_row(self):
+        self.user.access_type = ApiUser.TOKEN
+        self.user.save(update_fields=['access_type'])
+        request = RequestFactory().get('/')
+        request.COOKIES['vouch'] = 'cookie'
+        resolved = get_api_user(request)
+        self.assertEqual(resolved.access_type, ApiUser.COOKIE)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.access_type, ApiUser.TOKEN)
+
+    def test_token_precedence_is_the_same_on_cache_hit_and_refresh(self):
+        request = RequestFactory().get('/', HTTP_AUTHORIZATION='Bearer test')
+        request.COOKIES['vouch'] = 'cookie'
+        with mock.patch('publicationtrkr.utils.fabric_auth.auth_user_by_cookie') as cookie_auth:
+            self.assertEqual(get_api_user(request).access_type, ApiUser.TOKEN)
+            self.user.access_expires = None
+            self.user.save(update_fields=['access_expires'])
+            with mock.patch('publicationtrkr.utils.fabric_auth.auth_user_by_token', return_value=self.user):
+                self.assertEqual(get_api_user(request).access_type, ApiUser.TOKEN)
+            cookie_auth.assert_not_called()
+
+    def test_failed_token_refresh_does_not_cache_anonymous_and_can_fall_back_to_cookie(self):
+        request = RequestFactory().get('/', HTTP_AUTHORIZATION='Bearer test')
+        request.COOKIES['vouch'] = 'cookie'
+        self.user.access_expires = None
+        self.user.save(update_fields=['access_expires'])
+        with mock.patch('publicationtrkr.utils.fabric_auth.auth_user_by_token', return_value=self.anonymous), \
+                mock.patch('publicationtrkr.utils.fabric_auth.auth_user_by_cookie', return_value=self.user):
+            resolved = get_api_user(request)
+        self.assertEqual(resolved.uuid, self.user.uuid)
+        self.assertEqual(resolved.access_type, ApiUser.COOKIE)
+        self.anonymous.refresh_from_db()
+        self.assertIsNone(self.anonymous.access_expires)
+
+    def test_cookie_and_token_refresh_normalize_name_and_keep_account_uuid(self):
+        for auth, credential in ((auth_user_by_cookie, 'cookie'), (auth_user_by_token, 'token')):
+            with self.subTest(credential=credential):
+                session = mock.Mock()
+                session.headers = {}
+                session.get.side_effect = [
+                    mock.Mock(json=lambda: {'results': [{'uuid': 'person'}]}),
+                    mock.Mock(json=lambda: {'results': [{
+                        'name': '  Jos\u00e9\u00a0 Silva\n', 'email': 'person@example.test',
+                        'affiliation': 'University', 'cilogon_id': 'subject', 'roles': [],
+                    }]}),
+                ]
+                with mock.patch('publicationtrkr.utils.fabric_auth.requests.Session', return_value=session):
+                    resolved = auth(credential)
+                self.assertEqual(resolved.name, 'Jos\u00e9 Silva')
+                self.assertEqual(resolved.uuid, 'person')
+                self.assertEqual(resolved.pk, self.user.pk)
 
 
 # Scholar/Scopus identifier pass (issue #32, v1.15.0)
@@ -326,3 +454,75 @@ class SyncFabricUsersMetricsPassTests(SyncFabricUsersTests):
         keys = ApiUser(uuid='u-17', name='Someone').as_dict().keys()
         self.assertNotIn('google_scholar', keys)
         self.assertNotIn('scopus', keys)
+
+
+class NormalizeApiUserNamesTests(TestCase):
+    def setUp(self):
+        from publicationtrkr.apps.publications.models import Author
+
+        self.preferred_uuid = 'caf85ffe-b841-44b4-933c-098584753dc3'
+        self.other_uuid = 'another-fabric-account'
+        self.preferred = ApiUser.objects.create(
+            uuid=self.preferred_uuid, name=' Bruno\u00a0  Silva\t',
+            email='first@example.test', affiliation='First University',
+            cilogon_id='first-subject', fabric_roles=['Jupyterhub'], projects=[PROJECT_A],
+            has_logged_in=True, access_type=ApiUser.TOKEN,
+            access_expires=datetime.now(timezone.utc) + timedelta(minutes=10),
+            last_synced=datetime.now(timezone.utc), google_scholar='scholar-id',
+        )
+        self.other = ApiUser.objects.create(
+            uuid=self.other_uuid, name='Bruno  Silva', email='second@example.test',
+        )
+        ApiUser.objects.create(uuid='unchanged', name='Jos\u00e9 Example')
+        Author.objects.create(
+            uuid='author-one', publication_uuid='publication-one',
+            author_name='Bruno Silva', display_name='Bruno Silva', fabric_uuid=self.preferred_uuid,
+        )
+        Author.objects.create(
+            uuid='author-two', publication_uuid='publication-two',
+            author_name='Bruno Silva', display_name='Bruno Silva', fabric_uuid=self.other_uuid,
+        )
+        self.users_before = list(ApiUser.objects.order_by('pk').values())
+        self.authors_before = list(Author.objects.order_by('pk').values())
+
+    def test_default_preview_reports_each_uuid_and_reference_count_without_writes(self):
+        from publicationtrkr.apps.publications.models import Author
+
+        output = StringIO()
+        call_command('normalize_api_user_names', stdout=output)
+        self.assertEqual(list(ApiUser.objects.order_by('pk').values()), self.users_before)
+        self.assertEqual(list(Author.objects.order_by('pk').values()), self.authors_before)
+        self.assertIn('DRY RUN', output.getvalue())
+        self.assertIn(self.preferred_uuid, output.getvalue())
+        self.assertIn(self.other_uuid, output.getvalue())
+        self.assertEqual(output.getvalue().count('Author.fabric_uuid references: 1'), 2)
+        self.assertIn('Would normalize 2 name(s); 2 attribution reference(s) preserved.', output.getvalue())
+
+    def test_apply_changes_only_names_preserves_both_accounts_and_is_idempotent(self):
+        from publicationtrkr.apps.publications.models import Author
+
+        call_command('normalize_api_user_names', '--apply', stdout=StringIO())
+        expected = [dict(row) for row in self.users_before]
+        for row in expected:
+            if row['uuid'] in (self.preferred_uuid, self.other_uuid):
+                row['name'] = 'Bruno Silva'
+        self.assertEqual(list(ApiUser.objects.order_by('pk').values()), expected)
+        self.assertEqual(list(Author.objects.order_by('pk').values()), self.authors_before)
+        self.assertEqual(ApiUser.objects.filter(name='Bruno Silva').count(), 2)
+        output = StringIO()
+        call_command('normalize_api_user_names', '--apply', stdout=output)
+        self.assertIn('Normalized 0 name(s)', output.getvalue())
+        self.assertEqual(list(ApiUser.objects.order_by('pk').values()), expected)
+
+    def test_apply_rolls_back_all_names_if_a_later_save_fails(self):
+        original_save = ApiUser.save
+
+        def fail_second(user, *args, **kwargs):
+            if user.uuid == self.other_uuid:
+                raise RuntimeError('simulated failed update')
+            return original_save(user, *args, **kwargs)
+
+        with mock.patch.object(ApiUser, 'save', fail_second):
+            with self.assertRaisesMessage(RuntimeError, 'simulated failed update'):
+                call_command('normalize_api_user_names', '--apply', stdout=StringIO())
+        self.assertEqual(list(ApiUser.objects.order_by('pk').values()), self.users_before)

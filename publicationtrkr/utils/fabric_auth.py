@@ -10,6 +10,7 @@ import jwt
 import requests
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
+from publicationtrkr.utils.names import normalize_person_name
 
 # Outbound HTTP timeout, in seconds, for every call in this module. All of them sit on
 # the authentication path, so an unbounded request holds a uwsgi worker (4 processes x
@@ -212,10 +213,16 @@ def get_api_user(request) -> ApiUser:
                     # core-api rather than created by a login has no access_expires,
                     # so this stops being hypothetical once user sync lands.
                     if api_user.access_expires and api_user.access_expires > now:
+                        # Authentication mode belongs to this request. The stored
+                        # value only describes the last Core API refresh.
+                        api_user.access_type = ApiUser.TOKEN
                         return api_user
                 api_user = auth_user_by_token(token=token)
-                api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
-                api_user.save()
+                if api_user and api_user.is_authenticated:
+                    api_user.access_type = ApiUser.TOKEN
+                    api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
+                    api_user.save()
+                    return api_user
         if cookie:
             oidc_sub = get_oidc_sub_from_cookie(cookie=cookie)
             if oidc_sub:
@@ -227,10 +234,13 @@ def get_api_user(request) -> ApiUser:
                     # core-api rather than created by a login has no access_expires,
                     # so this stops being hypothetical once user sync lands.
                     if api_user.access_expires and api_user.access_expires > now:
+                        api_user.access_type = ApiUser.COOKIE
                         return api_user
                 api_user = auth_user_by_cookie(cookie=cookie)
-                api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
-                api_user.save()
+                if api_user and api_user.is_authenticated:
+                    api_user.access_type = ApiUser.COOKIE
+                    api_user.access_expires = now + timedelta(minutes=int(os.getenv('API_USER_REFRESH_CHECK_MINUTES')))
+                    api_user.save()
     except Exception as exc:
         print(exc)
         api_user = ApiUser.objects.filter(uuid=os.getenv('API_USER_ANON_UUID')).first()
@@ -348,7 +358,7 @@ def auth_user_by_cookie(cookie: str) -> ApiUser:
                               timeout=FABRIC_HTTP_TIMEOUT)
             api_user.affiliation = fab_person.json().get('results', [])[0].get('affiliation')
             api_user.email = fab_person.json().get('results', [])[0].get('email')
-            api_user.name = fab_person.json().get('results', [])[0].get('name')
+            api_user.name = normalize_person_name(fab_person.json().get('results', [])[0].get('name'))
             api_user.cilogon_id = fab_person.json().get('results', [])[0].get('cilogon_id')
             api_user.access_type = ApiUser.COOKIE
             # This row now has a real session behind it, whether it was created here or
@@ -386,7 +396,7 @@ def auth_user_by_token(token):
                               timeout=FABRIC_HTTP_TIMEOUT)
             api_user.affiliation = fab_person.json().get('results', [])[0].get('affiliation')
             api_user.email = fab_person.json().get('results', [])[0].get('email')
-            api_user.name = fab_person.json().get('results', [])[0].get('name')
+            api_user.name = normalize_person_name(fab_person.json().get('results', [])[0].get('name'))
             api_user.cilogon_id = fab_person.json().get('results', [])[0].get('cilogon_id')
             api_user.access_type = ApiUser.TOKEN
             # This row now has a real session behind it, whether it was created here or

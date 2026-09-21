@@ -39,6 +39,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from django.utils.dateparse import parse_datetime
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
@@ -49,6 +50,7 @@ from publicationtrkr.utils.core_api import (
     get_journey_tracker_people,
 )
 from publicationtrkr.utils.fabric_auth import split_fabric_roles
+from publicationtrkr.utils.names import normalize_person_name
 
 # Floor for --full. FABRIC's earliest `updated` timestamp is in April 2023; this leaves
 # generous margin. Windows before the first record come back empty and cost one cheap
@@ -252,7 +254,7 @@ class Command(BaseCommand):
                         'affiliation': person.get('affiliation') or '',
                         'email': person.get('email_address') or '',
                         'fabric_roles': fabric_roles,
-                        'name': person.get('name') or '',
+                        'name': normalize_person_name(person.get('name')),
                         'projects': projects,
                     }
 
@@ -268,7 +270,10 @@ class Command(BaseCommand):
                                 last_synced=now,
                                 **values,
                             )
-                            api_user.save()
+                            # A failed row must not poison the connection for the
+                            # rest of the run (including when invoked in a transaction).
+                            with transaction.atomic():
+                                api_user.save()
                             existing[fabric_uuid] = api_user
                         # Counted after the write, so a row that failed to save is
                         # reported once as an error rather than as both.
@@ -283,7 +288,8 @@ class Command(BaseCommand):
                         for field in changed:
                             setattr(api_user, field, values[field])
                         api_user.last_synced = now
-                        api_user.save(update_fields=changed + ['last_synced'])
+                        with transaction.atomic():
+                            api_user.save(update_fields=changed + ['last_synced'])
                     if changed:
                         updated += 1
                     else:
@@ -291,7 +297,10 @@ class Command(BaseCommand):
 
                 except Exception as exc:
                     self.stdout.write(self.style.ERROR(
-                        '  ERROR  {0}  -  {1}'.format(person.get('fabric_uuid'), exc)
+                        '  ERROR  {0}  -  {1}'.format(
+                            person.get('fabric_uuid') if isinstance(person, dict) else '<invalid row>',
+                            exc,
+                        )
                     ))
                     errors += 1
 
@@ -301,7 +310,11 @@ class Command(BaseCommand):
         metrics = self._sync_metrics(existing=existing, dry_run=dry_run)
 
         watermark_note = 'not advanced (dry run)'
-        if not dry_run and tracker is not None:
+        if errors:
+            # Keep the cadence timestamp too: --if-due must retry this failed run.
+            # Successful UUID-keyed writes can safely be replayed on that retry.
+            watermark_note = 'not advanced (directory row errors)'
+        elif not dry_run and tracker is not None:
             tracker.value = (now - WATERMARK_OVERLAP).isoformat()
             tracker.last_updated = now
             tracker.save(update_fields=['value', 'last_updated'])
@@ -340,6 +353,11 @@ class Command(BaseCommand):
                 )
             )
         self.stdout.write('Watermark    : {0}'.format(watermark_note))
+        if errors:
+            raise CommandError(
+                '{0} directory row(s) failed. Watermark not advanced; retry the sync.'
+                .format(errors)
+            )
 
     def _sync_metrics(self, existing, dry_run):
         """

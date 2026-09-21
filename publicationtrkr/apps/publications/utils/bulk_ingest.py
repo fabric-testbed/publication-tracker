@@ -193,13 +193,30 @@ def ingest(records, failures=None, *, api_user, resolve_project_name=None) -> di
         line = record.get('line')
         bibtex = record.get('bibtex', None)
         errors = validate_publication_data(
-            record, parse_bibtex(bibtex) if bibtex else {}, required=True)
+            record, parse_bibtex(bibtex) if isinstance(bibtex, str) and bibtex else {}, required=True)
         if errors:
             results.append(_failure(errors, index=index, line=line))
             continue
         try:
+            # A supplied name is an assertion to verify, not a reason to skip the
+            # project lookup. Resolve before opening the builder's transaction.
+            project_uuid = record.get('project_uuid')
+            validated_name = None
+            if project_uuid:
+                validated_name = resolve_project_name(project_uuid) if resolve_project_name else None
+                if not isinstance(validated_name, str) or not validated_name.strip():
+                    results.append(_failure([
+                        {'project_uuid': "unable to find project: '{0}'".format(project_uuid)},
+                    ], index=index, line=line))
+                    continue
+                if record.get('project_name') and record['project_name'] != validated_name:
+                    results.append(_failure([
+                        {'project_name': "does not match name found for project_uuid: '{0}'".format(project_uuid)},
+                    ], index=index, line=line))
+                    continue
             publication = create_publication(
-                data=record, api_user=api_user, resolve_project_name=resolve_project_name)
+                data=record, api_user=api_user,
+                resolve_project_name=lambda uuid: validated_name)
         except IntegrityError as exc:
             # The unique constraint on title/link. Re-uploading a file that overlaps
             # what is already stored is the ordinary case, not an error: the record is

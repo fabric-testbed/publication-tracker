@@ -1,7 +1,8 @@
 from uuid import UUID
-import os
+from collections.abc import Mapping
 
 from django.db.models import Q
+from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -11,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from publicationtrkr.apps.publications.api.serializers import AuthorSerializer, PublicationSerializer, PublicationCreateSerializer
-from publicationtrkr.apps.publications.api.validators import validate_publication_create, validate_publication_update
+from publicationtrkr.apps.publications.api.validators import validate_publication_create, validate_publication_update, query_project
 from publicationtrkr.apps.publications.models import Author, Publication
 from publicationtrkr.apps.publications.utils.bibtex_utils import generate_bibtex
 from publicationtrkr.apps.publications.utils.bulk_ingest import (
@@ -23,9 +24,8 @@ from publicationtrkr.apps.publications.utils.publication_builder import (
     create_publication,
     update_publication,
 )
+from publicationtrkr.apps.publications.utils.author_mutations import mutate_author, delete_publication
 from publicationtrkr.utils.fabric_auth import get_api_user, is_valid_uuid
-from publicationtrkr.apps.apiuser.models import ApiUser
-from publicationtrkr.utils.core_api import query_core_api_by_cookie, query_core_api_by_token
 
 
 class IsPublicationTrackerAdminOrReadOnly(permissions.BasePermission):
@@ -208,6 +208,8 @@ class PublicationViewSet(viewsets.ModelViewSet):
         - title
         - year
         """
+        if not isinstance(request.data, Mapping):
+            raise ValidationError(detail={'ValidationError': [{'body': 'must be a JSON object'}]})
         publication_uuid = request.data.get('uuid', None)
         if not publication_uuid:
             publication_uuid = kwargs.get('uuid')
@@ -238,14 +240,16 @@ class PublicationViewSet(viewsets.ModelViewSet):
         """
         destroy (DELETE {int:pk})
         """
+        if not isinstance(request.data, Mapping):
+            raise ValidationError({'body': 'must be a JSON object'})
         publication_uuid = request.data.get('uuid', None)
         if not publication_uuid:
             publication_uuid = kwargs.get('uuid')
         publication = get_object_or_404(Publication, uuid=publication_uuid)
         api_user = get_api_user(request=request)
         if is_publication_owner(api_user, publication) or api_user.is_publication_tracker_admin:
-            Author.objects.filter(publication_uuid=publication.uuid).delete()
-            publication.delete()
+            delete_publication(publication=publication, actor=api_user,
+                               reason=request.data.get('correction_reason', ''))
             return Response(status=204)
         else:
             raise PermissionDenied(
@@ -426,6 +430,26 @@ class AuthorViewSet(viewsets.ModelViewSet):
     filter_backends = [AuthorSearchFilter]
     lookup_field = 'uuid'
 
+    def perform_create(self, serializer):
+        try:
+            serializer.instance = mutate_author(
+                actor=get_api_user(request=self.request), data=serializer.validated_data)
+        except IntegrityError:
+            # A concurrent create on another publication can win after serializer
+            # validation. The database constraint is the final UUID authority.
+            raise ValidationError({'uuid': 'An author with this UUID already exists.'})
+
+    def perform_update(self, serializer):
+        serializer.instance = mutate_author(
+            actor=get_api_user(request=self.request), data=serializer.validated_data,
+            author=serializer.instance)
+
+    def perform_destroy(self, instance):
+        if not isinstance(self.request.data, Mapping):
+            raise ValidationError({'body': 'must be a JSON object'})
+        mutate_author(actor=get_api_user(request=self.request), author=instance,
+                      data={'correction_reason': self.request.data.get('correction_reason', '')}, delete=True)
+
 
 def get_project_name_from_uuid(request, project_uuid, api_user) -> str:
     if project_uuid:
@@ -437,18 +461,17 @@ def get_project_name_from_uuid(request, project_uuid, api_user) -> str:
             print('get_project_name_from_uuid: refusing non-UUID project_uuid')
             return None
         try:
-            if api_user.access_type == ApiUser.COOKIE:
-                fab_project = query_core_api_by_cookie(
-                    query='/projects/{0}'.format(project_uuid),
-                    cookie=request.COOKIES.get(os.getenv('VOUCH_COOKIE_NAME'), None))
-            else:
-                fab_project = query_core_api_by_token(
-                    query='/projects/{0}'.format(project_uuid),
-                    token=request.headers.get('authorization', 'Bearer ').replace('Bearer ', ''))
-            project_name = fab_project.get('results')[0].get('name')
-        except Exception as exc:
-            print(exc)
+            fab_project = query_project(request, api_user, project_uuid)
+            results = fab_project.get('results')
+            if (fab_project.get('status') != 200 or fab_project.get('size') != 1
+                    or not isinstance(results, list) or len(results) != 1):
+                return None
+            project_name = results[0].get('name')
+            if not isinstance(project_name, str) or not project_name.strip():
+                return None
+        except (AttributeError, KeyError, TypeError):
             project_name = None
+
     else:
         project_name = None
     return project_name
@@ -459,8 +482,8 @@ def memoized_project_name_resolver(request, api_user):
     A callable(project_uuid) -> str|None over get_project_name_from_uuid, caching for
     the life of one request.
 
-    get_project_name_from_uuid is an uncached core-api round trip. One per request is
-    fine; one per record is not. A 1000-record bulk upload naming a handful of projects
+    The lower-level query also shares its cache with single-record validation.
+    A 1000-record bulk upload naming a handful of projects
     would spend 1000 * FABRIC_HTTP_TIMEOUT_SECONDS in the worst case, against an nginx
     uwsgi_read_timeout measured in seconds -- the memo is what makes the record cap
     survivable rather than theoretical.

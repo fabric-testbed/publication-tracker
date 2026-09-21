@@ -92,7 +92,6 @@ INSTALLED_APPS = [
     'django_bootstrap5',  # django bootstrap
     'fontawesomefree',  # fontawesome free version
     'publicationtrkr.apps.apiuser',  # app: apiuser
-    'publicationtrkr.apps.pubsimple',  # app: pubsimple
     'publicationtrkr.apps.publications',  # app: publications
 ]
 

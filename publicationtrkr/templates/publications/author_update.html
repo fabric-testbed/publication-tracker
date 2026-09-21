@@ -69,6 +69,11 @@
                                 <br>
                                 <small class="text-muted">Must match an existing FABRIC user UUID, or leave blank to disassociate.</small>
                             </p>
+                            <p>
+                                {{ form.correction_reason.label_tag }} {{ form.correction_reason }}
+                                <br>
+                                <small class="text-muted">{{ form.correction_reason.help_text }}</small>
+                            </p>
                         {% else %}
                             <p>
                                 <small class="text-muted">

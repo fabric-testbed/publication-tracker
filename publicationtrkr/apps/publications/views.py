@@ -13,13 +13,11 @@ from rest_framework import status
 from publicationtrkr.apps.publications.api.serializers import PublicationSerializer
 from publicationtrkr.apps.publications.api.viewsets import AuthorViewSet, PublicationViewSet
 from publicationtrkr.apps.publications.forms import AuthorForm, PublicationForm
+from publicationtrkr.apps.publications.utils.author_mutations import mutate_author
 from publicationtrkr.apps.publications.models import Author, AuthorClaim, Publication
 from publicationtrkr.apps.publications.utils.claim_ledger import (
     approve_suggestion,
-    record_admin_claim,
-    record_self_claim,
     reject_suggestion,
-    withdraw_suggestions,
 )
 from publicationtrkr.server.settings import API_DEBUG, REST_FRAMEWORK
 from publicationtrkr.utils.fabric_auth import get_api_user
@@ -261,20 +259,6 @@ def author_update(request, *args, **kwargs):
     author = get_object_or_404(Author, uuid=author_uuid)
     message = None
 
-    # The stored values, read before any form touches this row.
-    #
-    # AuthorForm is a ModelForm bound to `author`, and a ModelForm's _post_clean() writes
-    # the submitted data onto its instance as part of is_valid(). Anything read off
-    # `author` after that point is therefore the *new* value, not the old one, however
-    # much the code below looks like it is comparing before with after. That is not
-    # hypothetical: the publication_uuid comparison in the admin branch has always read
-    # its "old" value after validation, so `old != new` was never true and the branch that
-    # keeps Publication.authors consistent when an author moves between publications has
-    # never run -- verified against a seeded database, where the move left auth-1 listed
-    # on the publication it had left and absent from the one it joined.
-    original_author_name = author.author_name
-    original_publication_uuid = author.publication_uuid
-
     if not (api_user.can_create_publication or api_user.is_publication_tracker_admin):
         return render(request, 'author_update.html', {
             'api_user': api_user.as_dict(),
@@ -317,45 +301,11 @@ def author_update(request, *args, **kwargs):
         form = AuthorForm(request.POST, instance=author, api_user=api_user)
         if form.is_valid():
             try:
-                if api_user.is_publication_tracker_admin:
-                    old_publication_uuid = original_publication_uuid
-                    old_author_name = original_author_name
-                    new_publication_uuid = form.cleaned_data['publication_uuid']
-                    author.author_name = form.cleaned_data['author_name']
-                    author.display_name = form.cleaned_data['display_name']
-                    author.publication_uuid = new_publication_uuid
-                    author.fabric_uuid = form.cleaned_data.get('fabric_uuid')
-                    author.save()
-                    # The ledger entry this path never had. An attribution typed in here
-                    # is a decision exactly as much as one made on the queue is, and one
-                    # that goes unrecorded leaves the queue offering suggestions for an
-                    # author that is already attributed until the next scoring run.
-                    record_admin_claim(author, author.fabric_uuid, decided_by=api_user)
-                    if author.author_name != old_author_name:
-                        # Suggestions were computed from the old spelling, so they are no
-                        # longer about this author. The next scoring run recomputes them.
-                        withdraw_suggestions(author)
-                    # Keep publication.authors arrays consistent when publication_uuid changes
-                    if old_publication_uuid != new_publication_uuid:
-                        try:
-                            old_pub = Publication.objects.get(uuid=old_publication_uuid)
-                            if author.uuid in old_pub.authors:
-                                old_pub.authors.remove(author.uuid)
-                                old_pub.save()
-                        except Publication.DoesNotExist:
-                            pass
-                        new_pub = Publication.objects.get(uuid=new_publication_uuid)
-                        if author.uuid not in new_pub.authors:
-                            new_pub.authors.append(author.uuid)
-                            new_pub.save()
-                else:
-                    author.display_name = form.cleaned_data['display_name']
-                    author.fabric_uuid = api_user.uuid
-                    author.save()
-                    # Option (a) on the issue: the self-claim stays immediate, and the
-                    # ledger records that it happened. Migration 0003 backfilled the same
-                    # row for every claim made before this existed.
-                    record_self_claim(author, api_user)
+                data = dict(form.cleaned_data)
+                author = mutate_author(
+                    actor=api_user, author=author, data=data,
+                    self_claim=not api_user.is_publication_tracker_admin,
+                )
                 return redirect('publication_detail', uuid=author.publication_uuid)
             except Exception as exc:
                 message = str(exc)

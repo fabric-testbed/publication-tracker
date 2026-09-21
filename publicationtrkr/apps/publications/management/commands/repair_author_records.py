@@ -74,6 +74,7 @@ from publicationtrkr.apps.publications.utils.claim_ledger import (
     withdraw_suggestions,
 )
 from publicationtrkr.apps.publications.utils.publication_builder import update_publication
+from publicationtrkr.apps.publications.utils.author_mutations import snapshot, record_correction
 
 DEFAULT_PLAN = Path(__file__).resolve().parents[2] / 'data' / 'issue_62_author_repairs.json'
 
@@ -142,12 +143,16 @@ class Command(BaseCommand):
 
         repaired = verified = 0
         with transaction.atomic():
+            # Match the API's publication -> author lock order across the entire plan.
+            publication_ids = {e['publication_uuid'] for e in entries + orphans}
+            list(Publication.objects.select_for_update().filter(uuid__in=publication_ids).order_by('pk'))
+            list(Author.objects.select_for_update().filter(publication_uuid__in=publication_ids).order_by('pk'))
             for entry in entries:
                 changed = self._repair_publication(entry, api_user)
                 repaired += 1 if changed else 0
                 verified += 0 if changed else 1
             for entry in orphans:
-                self._delete_orphan(entry)
+                self._delete_orphan(entry, api_user)
             self._report_criteria()
             if not apply_changes:
                 transaction.set_rollback(True)
@@ -214,6 +219,7 @@ class Command(BaseCommand):
             raise CommandError('No publication with uuid {0}'.format(pub_uuid))
 
         rows = self._rows_in_order(publication)
+        before_rows = {row.uuid: snapshot(row) for row in rows}
         current_names = [row.author_name for row in rows]
         target = entry['authors']
         target_names = [item['name'] for item in target]
@@ -294,7 +300,11 @@ class Command(BaseCommand):
         #    parse_bibtex made of it in the first place.
         payload = dict(fields)
         payload['authors'] = target_names
-        update_publication(publication=publication, data=payload, api_user=api_user)
+        update_publication(
+            publication=publication, data=payload, api_user=api_user,
+            author_slots=[rows[i].uuid if i < len(rows) else None for i in range(len(target_names))],
+            author_correction_reason=entry.get('note') or 'Apply reviewed author-record repair plan',
+        )
         publication.refresh_from_db()
         new_rows = self._rows_in_order(publication)
 
@@ -325,6 +335,16 @@ class Command(BaseCommand):
             self.stdout.write('    field  {0} written'.format(name))
 
         self._verify(publication, target)
+        after_rows = {row.uuid: row for row in self._rows_in_order(publication)}
+        for original in rows:
+            before = before_rows[original.uuid]
+            after = after_rows.get(original.uuid)
+            if after is None or snapshot(after) != before:
+                record_correction(
+                    after or original, api_user,
+                    entry.get('note') or 'Apply reviewed author-record repair plan',
+                    before, deleted=after is None,
+                )
         return True
 
     def _already_applied(self, publication, rows, target, fields):
@@ -364,7 +384,7 @@ class Command(BaseCommand):
 
     # -- orphan rows -------------------------------------------------------------
 
-    def _delete_orphan(self, entry):
+    def _delete_orphan(self, entry, api_user):
         """
         Delete an Author row that no publication's `authors` array names.
 
@@ -406,6 +426,10 @@ class Command(BaseCommand):
                     author.uuid[:8], sorted(losing - surviving)))
         self.stdout.write('    duplicate of {0} (slot {1}); deleting {2} claim row(s)'.format(
             twin.uuid[:8], twin.author_order, len(losing)))
+        record_correction(
+            author, api_user, entry.get('note') or 'Remove reviewed duplicate orphan author',
+            snapshot(author), deleted=True,
+        )
         author.delete()
 
     # -- acceptance criteria -----------------------------------------------------

@@ -43,7 +43,7 @@ Users authenticate via FABRIC's federated identity (CILogon / OAuth2). Role-base
 
 | Service | Image | Port | Purpose |
 |---|---|---|---|
-| `pubtrkr-database` | `postgres:18` | 5432 | PostgreSQL database |
+| `pubtrkr-database` | `postgres:15` | 5432 | PostgreSQL database |
 | `pubtrkr-nginx` | `nginx:1` | 8080 (HTTP), 8443 (HTTPS) | Reverse proxy + SSL termination |
 | `pubtrkr-vouch-proxy` | `fabrictestbed/vouch-proxy:0.27.1` | 9090 (internal) | OAuth2/OIDC authentication |
 | `pubtrkr-cron` | same image as `django` | none | Scheduled FABRIC user sync ([FABRIC User Sync](#fabric-user-sync)) |
@@ -88,7 +88,7 @@ Two auth modes are supported:
 
 - Python >= 3.12
 - Docker and Docker Compose (for production deployment)
-- PostgreSQL 18 (provided by Docker in production; external for local dev)
+- PostgreSQL 15 (provided by Docker in production; external for local dev)
 - CILogon client credentials (for OAuth2/OIDC)
 
 ### Python Dependencies
@@ -172,6 +172,7 @@ cp env.template .env
 | Variable | Example | Description |
 |---|---|---|
 | `VOUCH_COOKIE_NAME` | `fabric-service` | Name of the JWT cookie set by Vouch |
+| `VOUCH_COOKIE_DOMAIN` | *(unset)* | Match Vouch `cookie.domain` when set so Django logout expires the same cookie; unset keeps host-only cookies |
 | `VOUCH_JWT_SECRET` | `<secret>` | Shared secret for JWT validation |
 | `VOUCH_JWT_ISSUER` | `Vouch` | Expected `iss` on the Vouch cookie. Vouch Proxy's own default; empty means the claim is not checked |
 | `VOUCH_JWT_AUDIENCE` | *(unset)* | Expected `aud` on the Vouch cookie. Vouch stamps no top-level `aud` by default, so leave it empty unless yours does |
@@ -365,6 +366,25 @@ cd publicationtrkr
 
 The development server starts at `http://localhost:8000`.
 
+### Tests
+
+Run against a **disposable PostgreSQL database** whose user can create test databases:
+
+```bash
+uv sync --locked
+TEST_POSTGRES_HOST=127.0.0.1 TEST_POSTGRES_PORT=5432 \
+  TEST_POSTGRES_DB=publication_tracker_test \
+  TEST_POSTGRES_USER=publication_tracker_test \
+  TEST_POSTGRES_PASSWORD=test-only-password bash scripts/test.sh
+bash scripts/check-readme-sync.sh
+```
+
+The script runs Django checks, detects missing migrations, then discovers the full
+suite. It uses `publicationtrkr.server.test_settings` with synthetic application
+credentials and remote URLs; it does not source deployment `.env` files. Configure
+only `TEST_POSTGRES_*` for the database. CI runs on PostgreSQL 15. To select tests,
+append Django test labels to `scripts/test.sh`.
+
 ### Database Migrations
 
 Migration files are committed to the repository under
@@ -415,7 +435,11 @@ than 90 days, so a backfill is walked in 89-day chunks — currently 28 requests
 about 11 seconds. The watermark lives in the `user_sync_check` `TaskTimeoutTracker`
 row and is advanced **only** when every window in a run succeeded; a window that
 could not be read aborts the run, because a watermark moved past people who were
-never read would hide them until the next full backfill.
+never read would hide them until the next full backfill. A malformed or failed
+individual row also prevents advancement of both the watermark and cadence timestamp
+and causes a nonzero exit. Each upsert has its own savepoint, so good rows can finish;
+the next run safely replays the failed interval. Optional metrics failures remain
+nonfatal and do not block the directory watermark.
 
 **The Scholar/Scopus pass.** After the windows are walked, a second pass reads
 `GET /core-api-metrics/people` — one unwindowed request for the whole population — and
@@ -441,6 +465,20 @@ already exists — those belong to the login path. `/journey-tracker/people` doe
 return `cilogon_id`, which is our login join key, and that resolves itself: a synced
 row leaves it blank, and the first time that person signs in, `auth_user_by_cookie` /
 `auth_user_by_token` find the row by `uuid` and fill it in.
+
+#### Directory name whitespace cleanup
+
+Sync and login normalize whitespace in directory names, preserving case, diacritics,
+UUIDs, and distinct accounts. Preview existing names before explicitly applying cleanup:
+
+```bash
+python manage.py normalize_api_user_names           # dry run, no writes
+python manage.py normalize_api_user_names --apply   # atomic name-only updates
+```
+
+The report includes each affected UUID and its attribution reference count. This does
+not merge same-name accounts or reassign publications. Attribution ambiguity requires
+an explicit admin decision.
 
 #### Schedule
 
@@ -810,9 +848,30 @@ Django form.
 
 | Method | URL | Description |
 |---|---|---|
-| `GET` | `/api/authors` | List authors (paginated) |
-| `GET` | `/api/authors/<uuid>` | Get an author |
-| `PUT` | `/api/authors/<uuid>` | Update display name / claim authorship |
+| `GET` | `/api/authors` | Public list/search (paginated), 200 |
+| `GET` | `/api/authors/<uuid>` | Public author detail, 200 |
+| `POST` | `/api/authors` | Admin create, 201 |
+| `PUT` / `PATCH` | `/api/authors/<uuid>` | Admin update, 200 |
+| `DELETE` | `/api/authors/<uuid>` | Admin delete, 204 |
+
+Non-admin writes return 403. Responses retain `author_name`, `author_order`,
+`display_name`, `fabric_uuid`, `publication_uuid`, and `uuid`; list responses retain
+the existing pagination envelope. The author UUID is immutable and unique.
+
+Writes atomically maintain publication membership, author order, and claim history.
+`publication_uuid` must identify an existing publication; nonempty `fabric_uuid`
+must identify a directory user. Ordinary publication author-list edits retain author
+UUIDs when reordering exact names, and refuse edits that would repurpose or remove
+an author with attribution or decided claim history.
+
+Replacing or clearing existing attribution, or renaming, moving, or deleting an
+author with history, requires an explicit admin `correction_reason` (1–2000 characters).
+Send it alongside the author fields, or in the DELETE JSON body. It is write-only;
+missing reasons return 400. The same rule applies when deleting a publication with
+author history. Before/after snapshots, including prior claim decisions, survive
+author deletion in `AuthorCorrection`, viewable read-only in Django admin. Display-name
+edits preserve existing decision provenance. Self-claiming an unclaimed author through
+the web form remains immediate; changing another account's attribution needs an admin.
 
 ```bash
 # List authors (search by name)

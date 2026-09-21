@@ -5,10 +5,12 @@ from publicationtrkr.apps.publications.utils.bibtex_utils import generate_bibtex
 
 
 class AuthorSerializer(serializers.ModelSerializer):
+    correction_reason = serializers.CharField(required=False, allow_blank=True, max_length=2000, write_only=True)
+
     class Meta:
         model = Author
         fields = ['author_name', 'author_order', 'display_name', 'fabric_uuid', 'publication_uuid',
-                  'uuid']
+                  'uuid', 'correction_reason']
 
 
 class PublicationSerializer(serializers.ModelSerializer):
