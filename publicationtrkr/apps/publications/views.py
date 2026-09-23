@@ -592,7 +592,7 @@ def publication_project_list(request):
             base_qs = Publication.objects.none()
         queryset = base_qs.values('project_uuid', 'project_name').annotate(
             pub_count=Count('uuid')
-        ).order_by('project_name')
+        ).order_by('project_name', 'project_uuid')
         count = queryset.count()
         paginator = Paginator(queryset, page_size)
         current_page = int(request.GET.get('page', 1))
@@ -636,7 +636,7 @@ def publication_project_detail(request, *args, **kwargs):
     try:
         page_size = int(REST_FRAMEWORK['PAGE_SIZE'])
         search = request.GET.get('search', None)
-        base_qs = Publication.objects.filter(project_uuid=project_uuid).order_by('title')
+        base_qs = Publication.objects.filter(project_uuid=project_uuid).order_by('title', 'id')
         if search and len(search) >= 3:
             base_qs = base_qs.filter(
                 Q(title__icontains=search) | Q(project_name__icontains=search)
@@ -694,7 +694,7 @@ def publication_author_detail(request, *args, **kwargs):
         pub_uuids = Author.objects.filter(
             fabric_uuid=fabric_uuid
         ).values_list('publication_uuid', flat=True).distinct()
-        base_qs = Publication.objects.filter(uuid__in=pub_uuids).order_by('title')
+        base_qs = Publication.objects.filter(uuid__in=pub_uuids).order_by('title', 'id')
         if search and len(search) >= 3:
             base_qs = base_qs.filter(
                 Q(title__icontains=search) | Q(project_name__icontains=search)

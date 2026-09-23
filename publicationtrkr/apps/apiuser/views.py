@@ -20,7 +20,7 @@ def apiuser_list(request):
     if api_user.is_publication_tracker_admin:
         try:
             page_size = int(REST_FRAMEWORK['PAGE_SIZE'])
-            queryset = ApiUser.objects.all().order_by('name')
+            queryset = ApiUser.objects.all().order_by('name', 'id')
             search = request.GET.get('search', None)
             if search and len(search) >= 3:
                 queryset = queryset.filter(

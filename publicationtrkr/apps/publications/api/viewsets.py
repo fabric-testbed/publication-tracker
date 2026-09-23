@@ -103,7 +103,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         'destroy': PublicationSerializer,
     }
     default_serializer_class = PublicationSerializer
-    queryset = Publication.objects.all().order_by('title')
+    queryset = Publication.objects.all().order_by('title', 'id')
     permission_classes = [permissions.AllowAny]
     # ScopedRateThrottle is in DEFAULT_THROTTLE_CLASSES and reads this attribute; a
     # falsy scope means "not throttled by scope", so every action except bulk() is
@@ -149,9 +149,9 @@ class PublicationViewSet(viewsets.ModelViewSet):
         prefix = '-' if order_by == 'desc' else ''
         if sort_by == 'year':
             # secondary sort: title asc within each year
-            self.queryset = Publication.objects.all().order_by(f'{prefix}year', 'title')
+            self.queryset = Publication.objects.all().order_by(f'{prefix}year', 'title', 'id')
         else:
-            self.queryset = Publication.objects.all().order_by(f'{prefix}title')
+            self.queryset = Publication.objects.all().order_by(f'{prefix}title', 'id')
         return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
@@ -354,7 +354,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
         pub_uuids = Author.objects.filter(
             fabric_uuid=fabric_uuid
         ).values_list('publication_uuid', flat=True).distinct()
-        queryset = Publication.objects.filter(uuid__in=pub_uuids).order_by('title')
+        queryset = Publication.objects.filter(uuid__in=pub_uuids).order_by('title', 'id')
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = PublicationSerializer(page, many=True)
@@ -399,7 +399,7 @@ class PublicationViewSet(viewsets.ModelViewSet):
             UUID(project_uuid, version=4)
         except ValueError:
             raise ValidationError(detail={'project_uuid': 'A valid UUID is required.'})
-        queryset = Publication.objects.filter(project_uuid=project_uuid).order_by('title')
+        queryset = Publication.objects.filter(project_uuid=project_uuid).order_by('title', 'id')
         search = request.query_params.get('search', '').strip()
         if search and len(search) >= 3:
             queryset = queryset.filter(
@@ -425,7 +425,11 @@ class AuthorViewSet(viewsets.ModelViewSet):
     author_update web view, which has its own checks.
     """
     serializer_class = AuthorSerializer
-    queryset = Author.objects.all().order_by('author_name')
+    # 'id' breaks ties (#75). Most author_name values repeat -- one person credited on
+    # many papers -- and LIMIT/OFFSET pages over a non-unique key are not one
+    # consistent order: tied rows straddling a page boundary were served twice or
+    # never. Every paginated ordering in this app ends in a unique key for that reason.
+    queryset = Author.objects.all().order_by('author_name', 'id')
     permission_classes = [IsPublicationTrackerAdminOrReadOnly]
     filter_backends = [AuthorSearchFilter]
     lookup_field = 'uuid'
