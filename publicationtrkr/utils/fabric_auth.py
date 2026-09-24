@@ -10,7 +10,8 @@ import jwt
 import requests
 from django.db import transaction
 
-from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
+from publicationtrkr.apps.apiuser.models import ApiUser, ApiUserProjectMembership, TaskTimeoutTracker
+from publicationtrkr.apps.apiuser.utils.memberships import record_memberships
 from publicationtrkr.apps.publications.utils.display_names import follow_account_name_change
 from publicationtrkr.utils.names import normalize_person_name
 
@@ -268,6 +269,11 @@ def save_refreshed_user(api_user: ApiUser) -> None:
         stored = ApiUser.objects.select_for_update(no_key=True).filter(pk=api_user.pk) \
             .values_list('name', flat=True).first()
     api_user.save()
+    # Login is the first place a new membership shows up -- the nightly sync may not see
+    # it for days (#72). Same transaction as the save, so history never runs ahead of the
+    # row it describes.
+    record_memberships(api_user.id, api_user.projects, datetime.now(timezone.utc),
+                       ApiUserProjectMembership.LOGIN)
     if stored is not None and stored != api_user.name:
         follow_account_name_change(api_user.uuid, api_user.name)
 

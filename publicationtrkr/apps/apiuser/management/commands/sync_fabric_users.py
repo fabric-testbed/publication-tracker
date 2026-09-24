@@ -50,8 +50,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
 
-from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
+from publicationtrkr.apps.apiuser.models import (
+    ApiUser, ApiUserProjectMembership, TaskTimeoutTracker,
+)
 from publicationtrkr.apps.apiuser.utils.locks import SYNC_ADVISORY_LOCK_KEY, advisory_lock
+from publicationtrkr.apps.apiuser.utils.memberships import record_memberships
 from publicationtrkr.apps.publications.utils.display_names import follow_account_name_change
 from publicationtrkr.utils.core_api import (
     JOURNEY_TRACKER_MAX_WINDOW_DAYS,
@@ -83,6 +86,17 @@ SYNCED_FIELDS = ('active', 'affiliation', 'email', 'fabric_roles', 'name', 'proj
 # they come from a different endpoint, under a different token, in a pass with a different
 # shape, and one failing must not leave the other half-written.
 METRICS_FIELDS = ('google_scholar', 'scopus')
+
+
+def token_rejected(exc) -> bool:
+    """
+    Whether a Core API call failed because the token itself was refused (#57).
+
+    Both tokens are static bootstrap tokens Core API has scheduled for deletion. When
+    that lands every call answers 401, and a 401 buried in a generic failure line reads
+    like an outage to be retried rather than a credential to be replaced.
+    """
+    return getattr(getattr(exc, 'response', None), 'status_code', None) == 401
 
 
 def iter_windows(start, end, newest_first: bool = False):
@@ -228,6 +242,17 @@ class Command(BaseCommand):
         # Credited Author rows whose display_name followed a changed account name, and
         # rows left alone because the new name is unusable (#73).
         names_followed = names_kept = 0
+        # Membership history (#72). `ended` counts memberships present on the stored row
+        # but absent from Core API's answer: the drift a --full run exists to catch, and
+        # the number a post-deploy check expects to read 0 the day after.
+        memberships_new = memberships_ended = 0
+        # A dry run cannot ask the upsert what it would insert, so it compares against
+        # the table instead: one read up front, like `existing` above.
+        history = {}
+        if dry_run:
+            for api_user_id, project_uuid in ApiUserProjectMembership.objects.values_list(
+                    'api_user_id', 'project_uuid'):
+                history.setdefault(api_user_id, set()).add(project_uuid)
         seen = set()
 
         for window_start, window_end in windows:
@@ -240,6 +265,11 @@ class Command(BaseCommand):
                 # A window we could not read must abort the run. Continuing would let
                 # the watermark advance past people we never saw, and they would stay
                 # missing until someone noticed and ran --full.
+                if token_rejected(exc):
+                    raise CommandError(
+                        'Core API rejected FABRIC_CORE_API_TOKEN (401) -- the token may have '
+                        'been deleted; see #57. Watermark not advanced.'
+                    )
                 raise CommandError(
                     'Window {0} failed: {1}. Watermark not advanced.'.format(label, exc)
                 )
@@ -286,7 +316,11 @@ class Command(BaseCommand):
                             # rest of the run (including when invoked in a transaction).
                             with transaction.atomic():
                                 api_user.save()
+                                memberships_new += record_memberships(
+                                    api_user.id, projects, now, ApiUserProjectMembership.SYNC)
                             existing[fabric_uuid] = api_user
+                        else:
+                            memberships_new += len(set(filter(None, projects)))
                         # Counted after the write, so a row that failed to save is
                         # reported once as an error rather than as both.
                         created += 1
@@ -296,6 +330,7 @@ class Command(BaseCommand):
                         field for field in SYNCED_FIELDS
                         if getattr(api_user, field) != values[field]
                     ]
+                    memberships_ended += len(set(api_user.projects or []) - set(projects))
                     followed = kept = 0
                     if not dry_run:
                         for field in changed:
@@ -303,11 +338,20 @@ class Command(BaseCommand):
                         api_user.last_synced = now
                         with transaction.atomic():
                             api_user.save(update_fields=changed + ['last_synced'])
+                            # Unchanged people too: their memberships were observed
+                            # tonight, and a last_seen that only moved on change would
+                            # stop meaning anything. The row and its history commit
+                            # together or not at all.
+                            memberships_new += record_memberships(
+                                api_user.id, projects, now, ApiUserProjectMembership.SYNC)
                             if 'name' in changed:
                                 followed, kept = follow_account_name_change(fabric_uuid, values['name'])
-                    elif 'name' in changed:
-                        followed, kept = follow_account_name_change(
-                            fabric_uuid, values['name'], apply=False)
+                    else:
+                        memberships_new += len(
+                            set(filter(None, projects)) - history.get(api_user.id, set()))
+                        if 'name' in changed:
+                            followed, kept = follow_account_name_change(
+                                fabric_uuid, values['name'], apply=False)
                     names_followed += followed
                     names_kept += kept
                     if changed:
@@ -355,6 +399,11 @@ class Command(BaseCommand):
             'Author names : {0} credited row(s) {1} a changed account name; {2} kept '
             '(new name unusable)'.format(
                 names_followed, 'would follow' if dry_run else 'followed', names_kept)
+        )
+        self.stdout.write(
+            'Memberships  : {0} new {1}; {2} no longer current (history kept)'.format(
+                memberships_new, 'would be recorded' if dry_run else 'recorded',
+                memberships_ended)
         )
         self.stdout.write('Skipped      : {0}'.format(skipped))
         if missing_affiliation:
@@ -427,6 +476,15 @@ class Command(BaseCommand):
             # rather than returning [] so that "we could not ask" is distinguishable from
             # "nobody has an identifier" right here, which is what makes this branch
             # possible at all.
+            if token_rejected(exc):
+                # Still not raised: the directory sync above succeeded. But named, so a
+                # deleted services token is recognisable in the log on the first night.
+                self.stdout.write(self.style.ERROR(
+                    'Scholar/Scopus pass failed: Core API rejected '
+                    'FABRIC_CORE_API_SERVICES_TOKEN (401) -- the token may have been '
+                    'deleted; see #57. Identifiers left unchanged.'
+                ))
+                return None
             self.stdout.write(self.style.ERROR(
                 'Scholar/Scopus pass failed: {0}. Identifiers left unchanged.'.format(exc)
             ))

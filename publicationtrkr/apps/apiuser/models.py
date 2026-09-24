@@ -91,6 +91,55 @@ class ApiUser(models.Model):
         return self.uuid
 
 
+
+class ApiUserProjectMembership(models.Model):
+    """
+    Every project a person has ever been observed to belong to (#72). Never deleted.
+
+    `ApiUser.projects` is *current* membership and is what authorization reads; this is
+    history, and only author-claim scoring reads it. The two are kept apart on purpose: a
+    person who left a project must lose its permissions, but a paper they wrote while a
+    member is still evidence about who they are.
+
+    `first_seen` / `last_seen` are the dates this service *observed* the membership, not
+    the dates the person joined or left. A row that stops being refreshed means the
+    membership ended at some point after `last_seen`; nothing here knows when.
+
+    `source` names whoever recorded the earliest `first_seen`. `seed` means that date is
+    the day we first looked -- migration 0006, or a pre-deploy dump -- and says nothing
+    about when the membership began.
+
+    Written only through utils/memberships.py, whose upsert keeps `first_seen` at the
+    earliest and `last_seen` at the latest value ever offered, so callers never need to
+    arrive in date order.
+    """
+    SEED = 'seed'
+    SYNC = 'sync'
+    LOGIN = 'login'
+    SOURCE_CHOICES = (
+        (SEED, 'Seeded from existing data'),
+        (SYNC, 'Directory sync'),
+        (LOGIN, 'Login refresh'),
+    )
+    # CASCADE is moot in practice -- ApiUser rows are never deleted -- but if one ever
+    # is, its history has nothing left to be evidence about.
+    api_user = models.ForeignKey(ApiUser, on_delete=models.CASCADE, related_name='memberships')
+    first_seen = models.DateTimeField()
+    last_seen = models.DateTimeField()
+    # Indexed: scoring asks "who was ever on this paper's project", not "what was this
+    # person ever on".
+    project_uuid = models.CharField(max_length=255, db_index=True)
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(fields=['api_user', 'project_uuid'],
+                             name='unique_api_user_project_membership'),
+        ]
+
+    def __str__(self):
+        return '{0} in {1}'.format(self.api_user_id, self.project_uuid)
+
 class TaskTimeoutTracker(models.Model):
     """
     Task Timeout Tracker

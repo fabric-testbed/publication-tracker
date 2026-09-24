@@ -13,10 +13,12 @@ in the environment.
 """
 
 import os
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from unittest import mock
 
+import requests
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import RequestFactory, SimpleTestCase, TestCase
@@ -28,6 +30,13 @@ from publicationtrkr.utils.fabric_auth import (
 
 PROJECT_A = 'f0e4a6c1-1111-4a2b-9c3d-000000000001'
 PROJECT_B = 'f0e4a6c1-2222-4a2b-9c3d-000000000002'
+
+
+def http_error(status):
+    """What raise_for_status() raises, carrying the response the sync inspects."""
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError('{0} Client Error'.format(status), response=response)
 
 
 class SplitFabricRolesTests(SimpleTestCase):
@@ -210,6 +219,17 @@ class SyncFabricUsersTests(TestCase):
         ):
             with self.assertRaises(CommandError):
                 call_command('sync_fabric_users', '--since', '2026-08-01')
+        self.assertIsNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
+
+    def test_a_rejected_token_is_named_as_such(self):
+        # #57: both tokens are scheduled for deletion. The day that lands has to read as
+        # "replace the credential", not as a Core API outage to wait out.
+        with mock.patch(
+            'publicationtrkr.apps.apiuser.management.commands.sync_fabric_users'
+            '.get_journey_tracker_people',
+            side_effect=http_error(401),
+        ), self.assertRaisesRegex(CommandError, 'rejected FABRIC_CORE_API_TOKEN .401.*#57'):
+            call_command('sync_fabric_users', '--since', '2026-08-01')
         self.assertIsNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
 
     def test_successful_run_advances_the_watermark(self):
@@ -440,6 +460,16 @@ class SyncFabricUsersMetricsPassTests(SyncFabricUsersTests):
         self.run_sync([person('u-15')], '--since', '2026-08-01',
                       metrics_error=RuntimeError('502 Bad Gateway'))
         self.assertEqual(ApiUser.objects.get(uuid='u-15').google_scholar, 'kept')
+        self.assertIsNotNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
+
+    def test_a_rejected_services_token_is_named_but_does_not_fail_the_sync(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            self.run_sync([person('u-17')], '--since', '2026-08-01',
+                          metrics_error=http_error(401))
+        self.assertIn('rejected FABRIC_CORE_API_SERVICES_TOKEN (401)', out.getvalue())
+        self.assertIn('#57', out.getvalue())
+        # The directory sync itself succeeded, so the watermark still advances.
         self.assertIsNotNone(TaskTimeoutTracker.objects.get(name='user_sync_check').value)
 
     def test_a_dry_run_writes_no_identifiers(self):

@@ -22,6 +22,13 @@ done
 >&2 echo "cron sidecar: Postgres is up"
 
 SCHEDULE="${USER_SYNC_CRON_SCHEDULE:-0 3 * * *}"
+# The weekly full pass (#72). The nightly incremental sync only sees people whose Core API
+# record was updated, and joining or leaving a project does not update it -- so without a
+# full pass, membership drifts until someone notices. 28 requests; an hour before the
+# incremental run, which then finds the lock free or skips harmlessly if it is not.
+# Safe only because membership history exists: a full pass applies removals, and the
+# history is what keeps those removals from erasing claim-scoring evidence.
+FULL_SCHEDULE="${USER_SYNC_FULL_CRON_SCHEDULE:-0 2 * * 0}"
 # Author-claim scoring (#32). Default is half an hour after the user sync, and that
 # ordering is the point: scoring's strongest signal is project co-membership read out of
 # ApiUser.projects, so a run that goes first scores against yesterday's directory.
@@ -49,6 +56,14 @@ SHELL=/bin/bash
 ${SCHEDULE} root su appuser -s /bin/bash -c "/code/scripts/run-user-sync.sh" >/proc/1/fd/1 2>/proc/1/fd/2
 CRON
 
+# Same wrapper, same privilege drop, same /tmp/user-sync.lock as the incremental job --
+# which is the point: a run started by hand as root in this container would create that
+# lock file root-owned and leave every later appuser job unable to open it.
+cat >/etc/cron.d/user-sync-full <<CRON
+SHELL=/bin/bash
+${FULL_SCHEDULE} root su appuser -s /bin/bash -c "/code/scripts/run-user-sync.sh --full" >/proc/1/fd/1 2>/proc/1/fd/2
+CRON
+
 # Its own file rather than a second line in user-sync's, so that a broken schedule in one
 # cannot take the other down with it: cron rejects a malformed /etc/cron.d file whole.
 #
@@ -66,9 +81,10 @@ CRON
 
 # /etc/cron.d entries are ignored unless they are root-owned, mode 0644, and newline
 # terminated. The heredoc handles the newline; these handle the rest.
-chown root:root /etc/cron.d/user-sync /etc/cron.d/claim-scoring
-chmod 0644 /etc/cron.d/user-sync /etc/cron.d/claim-scoring
+chown root:root /etc/cron.d/user-sync /etc/cron.d/user-sync-full /etc/cron.d/claim-scoring
+chmod 0644 /etc/cron.d/user-sync /etc/cron.d/user-sync-full /etc/cron.d/claim-scoring
 
 >&2 echo "cron sidecar: user sync scheduled as '${SCHEDULE}'"
+>&2 echo "cron sidecar: full user sync scheduled as '${FULL_SCHEDULE}'"
 >&2 echo "cron sidecar: claim scoring scheduled as '${CLAIM_SCHEDULE}'"
 exec cron -f

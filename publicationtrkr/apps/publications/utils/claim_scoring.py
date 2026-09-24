@@ -8,7 +8,8 @@ nightly `sync_fabric_users` has already written onto a row this module was hande
   1. **Project co-membership.** `Publication.project_uuid` against `ApiUser.projects`.
      The strongest signal available and free: a paper attributed to a project the person
      belongs to is real evidence, and it got substantially better when the directory went
-     from 14 rows to 3,296 in 1.12.0.
+     from 14 rows to 3,296 in 1.12.0. Since v1.22.0 (#72) a *former* membership counts
+     too, read from ApiUserProjectMembership -- see MembershipHistory below.
   2. **Name compatibility.** Scored rather than matched -- see utils/name_matching.py.
   3. **Co-authorship propagation.** Whether this person is already attributed on a
      publication that shares a person with this one. Added in v1.15.0.
@@ -68,18 +69,58 @@ WEIGHT_PROPAGATION = 0.15
 # never evidence on its own.
 WEIGHT_SCHOLAR = 0.05
 
+# What a membership that has ended is worth, as a fraction of WEIGHT_PROJECT (#72).
+# Full value to start with: someone who was on the project is the same evidence about
+# a paper from it whether or not they are still there, and papers mostly arrive after
+# the project that produced them has wound down. History cannot tell whether the
+# membership overlapped the paper -- seeded dates are observation dates -- so this is
+# the knob to turn if former members prove to be noise. Measure on the real queue
+# before changing it (`score_author_claims --dry-run --former-member-value`).
+FORMER_MEMBER_VALUE = 1.0
+
 # Below this, a suggestion is noise rather than a candidate. Scaled with the weights above
 # so that v1.14.0's queue membership is preserved exactly where no new signal fires.
 MIN_SCORE = 0.24
 
 
-def project_signal(publication, api_user) -> tuple:
-    """(value in 0..1, detail). Absence of a project on the paper is no signal, not a negative."""
+class MembershipHistory:
+    """
+    Every project each person has ever been observed on, for the project signal (#72).
+
+    Built once per scoring run from ApiUserProjectMembership, keyed by ApiUser.uuid like
+    the co-authorship graph, so the signal is a dict lookup inside the scoring loop.
+    Scoring only: authorization reads ApiUser.projects and never this.
+    """
+
+    def __init__(self, last_seen=None, former_value=FORMER_MEMBER_VALUE):
+        # {api_user uuid: {project_uuid: last_seen datetime}}
+        self._last_seen = last_seen or {}
+        self.former_value = former_value
+
+    def last_seen(self, api_user_uuid, project_uuid):
+        return self._last_seen.get(api_user_uuid, {}).get(project_uuid)
+
+
+def project_signal(publication, api_user, history=None) -> tuple:
+    """
+    (value in 0..1, detail). Absence of a project on the paper is no signal, not a negative.
+
+    A current member scores exactly as before #72 -- same value, same detail string -- so
+    history changes no standing suggestion except where it adds a former membership. The
+    detail says "former member" in that case, because a reviewer weighing the suggestion
+    should know the person has since left.
+    """
     project_uuid = getattr(publication, 'project_uuid', None) if publication else None
     if not project_uuid:
         return 0.0, 'publication has no project'
     if project_uuid in (api_user.projects or []):
         return 1.0, 'member of the publication project {0}'.format(project_uuid)
+    last_seen = history.last_seen(getattr(api_user, 'uuid', None), project_uuid) if history else None
+    if last_seen is not None:
+        return history.former_value, (
+            'former member of the publication project {0} (last seen {1:%Y-%m-%d})'.format(
+                project_uuid, last_seen)
+        )
     return 0.0, 'not a member of the publication project'
 
 
@@ -206,7 +247,7 @@ def propagation_signal(api_user, publication, graph) -> tuple:
     return 1.0, detail
 
 
-def score_pair(author, api_user, publication, graph=None) -> dict | None:
+def score_pair(author, api_user, publication, graph=None, history=None) -> dict | None:
     """
     Score one (author, user) pair, or return None when the pair is not a candidate.
 
@@ -218,7 +259,8 @@ def score_pair(author, api_user, publication, graph=None) -> dict | None:
     see which publication and which co-author the boost travelled through.
 
     `graph` is what build_coauthorship_graph returned, or None -- the propagation signal
-    then contributes 0.0 and the pair scores on the other three.
+    then contributes 0.0 and the pair scores on the other three. `history` is a
+    MembershipHistory, or None -- only current membership then counts.
     """
     name_value, name_detail, surname_matched = name_compatibility(
         author.author_name, api_user.name
@@ -226,7 +268,7 @@ def score_pair(author, api_user, publication, graph=None) -> dict | None:
     if not surname_matched:
         return None
 
-    project_value, project_detail = project_signal(publication, api_user)
+    project_value, project_detail = project_signal(publication, api_user, history)
     propagation_value, propagation_detail = propagation_signal(
         api_user, publication, graph
     )
@@ -258,7 +300,7 @@ def score_pair(author, api_user, publication, graph=None) -> dict | None:
     return {'score': round(score, 4), 'signals': signals}
 
 
-def candidates_for_author(author, api_users, publication, graph=None) -> list:
+def candidates_for_author(author, api_users, publication, graph=None, history=None) -> list:
     """
     Every scoring candidate for one author, best first.
 
@@ -267,7 +309,7 @@ def candidates_for_author(author, api_users, publication, graph=None) -> list:
     """
     scored = []
     for api_user in api_users:
-        result = score_pair(author, api_user, publication, graph)
+        result = score_pair(author, api_user, publication, graph, history)
         if result is None or result['score'] < MIN_SCORE:
             continue
         scored.append((result['score'], api_user, result['signals']))

@@ -29,13 +29,15 @@ Usage:
     python manage.py score_author_claims --dry-run    # report only, no writes
     python manage.py score_author_claims --full       # rescore every author, claimed too
     python manage.py score_author_claims --if-due     # no-op unless the cadence elapsed
+    python manage.py score_author_claims --dry-run --former-member-value 0.5
+                                                      # measure a different weight (#72)
 """
 
 import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from publicationtrkr.apps.apiuser.models import ApiUser, TaskTimeoutTracker
@@ -43,9 +45,12 @@ from publicationtrkr.apps.apiuser.utils.locks import (
     CLAIM_SCORING_ADVISORY_LOCK_KEY,
     advisory_lock,
 )
+from publicationtrkr.apps.apiuser.utils.memberships import load_last_seen
 from publicationtrkr.apps.publications.models import Author, AuthorClaim, Publication
 from publicationtrkr.apps.publications.utils.claim_scoring import (
+    FORMER_MEMBER_VALUE,
     MIN_SCORE,
+    MembershipHistory,
     build_coauthorship_graph,
     candidates_for_author,
 )
@@ -101,11 +106,29 @@ class Command(BaseCommand):
             help='Exit without scoring unless CLM_TIMEOUT_IN_SECONDS has elapsed since '
                  'the last run. Lets the sidecar fire more often than the cadence.',
         )
+        parser.add_argument(
+            '--former-member-value',
+            type=float,
+            default=None,
+            help='Dry run only: score a former project membership at this fraction of '
+                 'the project weight instead of FORMER_MEMBER_VALUE ({0}), to measure '
+                 'a change before making it (#72).'.format(FORMER_MEMBER_VALUE),
+        )
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         full = options['full']
         if_due = options['if_due']
+        former_value = options['former_member_value']
+        if former_value is not None:
+            # Dry run only, so a trial value can never leave rows scored by a weight the
+            # code does not hold -- the next nightly run would silently rescore them all.
+            if not dry_run:
+                raise CommandError('--former-member-value needs --dry-run.')
+            if not 0.0 <= former_value <= 1.0:
+                raise CommandError('--former-member-value must be between 0 and 1.')
+        else:
+            former_value = FORMER_MEMBER_VALUE
 
         tracker_name = os.getenv('CLM_NAME') or 'claim_scoring_check'
         tracker = TaskTimeoutTracker.objects.filter(name=tracker_name).first()
@@ -134,9 +157,10 @@ class Command(BaseCommand):
                     'scoring.'
                 ))
                 return
-            self._score(full=full, dry_run=dry_run, tracker=tracker, now=now)
+            self._score(full=full, dry_run=dry_run, tracker=tracker, now=now,
+                        former_value=former_value)
 
-    def _score(self, full, dry_run, tracker, now):
+    def _score(self, full, dry_run, tracker, now, former_value=FORMER_MEMBER_VALUE):
         authors = Author.objects.all() if full \
             else Author.objects.filter(fabric_uuid__isnull=True)
         authors = list(authors.order_by('id'))
@@ -188,6 +212,16 @@ class Command(BaseCommand):
             ),
         )
 
+        # Every membership ever observed (#72), so a person who has left a paper's project
+        # still carries it as evidence. One query, like the graph above.
+        last_seen = load_last_seen()
+        history = MembershipHistory(last_seen, former_value=former_value)
+        former_count = sum(
+            1 for user in api_users
+            for project_uuid in last_seen.get(user.uuid, {})
+            if project_uuid not in (user.projects or [])
+        )
+
         # Pairs an admin has already ruled on, so scoring can leave them alone.
         decided = {
             (c.author_id, c.api_user_id)
@@ -203,9 +237,12 @@ class Command(BaseCommand):
             'Candidates     : {2} active FABRIC users\n'
             'Already decided: {3} pair(s), left untouched\n'
             'Co-authorship  : {4} attribution(s); {5} publication(s) have a '
-            'neighbourhood\n'.format(
+            'neighbourhood\n'
+            'Memberships    : {6} former membership(s) among candidates, scored at '
+            '{7} of the project weight\n'.format(
                 len(authors), 'all' if full else 'unclaimed only',
                 len(api_users), len(decided), len(attributions), len(graph),
+                former_count, former_value,
             )
         )
 
@@ -219,10 +256,13 @@ class Command(BaseCommand):
         # count. See _report_score_changes.
         deltas = []
         new_scores = []
+        # Suggestions a former membership contributed to, listed in full after the
+        # summary: the first runs after #72 are the ones to read pair by pair.
+        former = []
 
         for author in authors:
             publication = publications.get(author.publication_uuid)
-            ranked = candidates_for_author(author, api_users, publication, graph)
+            ranked = candidates_for_author(author, api_users, publication, graph, history)
             ranked = ranked[:MAX_SUGGESTIONS_PER_AUTHOR]
             if ranked:
                 authors_with_suggestions += 1
@@ -253,6 +293,8 @@ class Command(BaseCommand):
                     unchanged += 1
                 elif state == 'decided':
                     skipped_decided += 1
+                if state != 'decided' and signals.get('project', {}).get('detail', '').startswith('former'):
+                    former.append((state, score, previous, author, api_user, publication))
 
         # A standing suggestion that no longer scores is withdrawn -- an author renamed
         # through the API should not keep the suggestions computed from the old spelling.
@@ -278,6 +320,7 @@ class Command(BaseCommand):
         )
 
         self._report_score_changes(deltas, new_scores, stale, dry_run)
+        self._report_former_members(former)
 
         if dry_run:
             self.stdout.write('Cadence      : not advanced (dry run)')
@@ -287,6 +330,19 @@ class Command(BaseCommand):
             tracker.value = now.isoformat()
             tracker.save(update_fields=['last_updated', 'value'])
             self.stdout.write('Cadence      : advanced to {0}'.format(tracker.value))
+
+    def _report_former_members(self, former):
+        """Every suggestion a former membership scored, so a reviewer can read them all."""
+        if not former:
+            return
+        self.stdout.write('\n--- Former-member suggestions ({0}) ---'.format(len(former)))
+        for state, score, previous, author, api_user, publication in former:
+            self.stdout.write('{0:9s} {1:.4f}{2}  {3!r} -> {4} ({5})  on "{6}"'.format(
+                state, score,
+                '' if previous is None else ' (was {0:.4f})'.format(previous),
+                author.author_name, api_user.name, api_user.uuid,
+                getattr(publication, 'title', author.publication_uuid),
+            ))
 
     def _report_score_changes(self, deltas, new_scores, stale, dry_run):
         """
